@@ -35,6 +35,7 @@ import os
 import pickle
 import queue
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -402,9 +403,10 @@ class QueuedPickleNumpySuffixDispatcher(PI05SuffixDispatcher):
 
     name = "queued_pickle_numpy_dispatcher"
 
-    def __init__(self):
+    def __init__(self, dispatch_delay_s: float = 0.0):
         self.request_queue: queue.Queue[QueuedSuffixRequest | None] = queue.Queue()
         self.response_queue: queue.Queue[QueuedSuffixResponse] = queue.Queue()
+        self.dispatch_delay_s = dispatch_delay_s
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
 
@@ -413,6 +415,8 @@ class QueuedPickleNumpySuffixDispatcher(PI05SuffixDispatcher):
             item = self.request_queue.get()
             if item is None:
                 return
+            if self.dispatch_delay_s > 0:
+                time.sleep(self.dispatch_delay_s)
             self.response_queue.put(QueuedSuffixResponse(payload=item.payload))
 
     def dispatch(self, payload: NumpySerializedSuffixPayload) -> DispatchedSuffixEnvelope:
@@ -433,10 +437,10 @@ class QueuedDispatchedNumpyPI05SuffixBackend(PI05SuffixBackend):
 
     name = "queued_dispatched_numpy_local"
 
-    def __init__(self, local_backend: LocalPI05SuffixBackend):
+    def __init__(self, local_backend: LocalPI05SuffixBackend, dispatch_delay_s: float = 0.0):
         self.local_backend = local_backend
         self.numpy_backend = NumpySerializedPI05SuffixBackend(local_backend)
-        self.dispatcher = QueuedPickleNumpySuffixDispatcher()
+        self.dispatcher = QueuedPickleNumpySuffixDispatcher(dispatch_delay_s=dispatch_delay_s)
 
     def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
         payload = self.numpy_backend.serialize(request)
@@ -444,6 +448,15 @@ class QueuedDispatchedNumpyPI05SuffixBackend(PI05SuffixBackend):
         restored_payload = self.dispatcher.receive(envelope)
         restored_request = self.numpy_backend.deserialize(restored_payload)
         return self.local_backend.run(policy, restored_request)
+
+
+class DelayedQueuedDispatchedNumpyPI05SuffixBackend(QueuedDispatchedNumpyPI05SuffixBackend):
+    """Queued dispatched backend with configurable artificial transport delay."""
+
+    name = "delayed_queued_dispatched_numpy_local"
+
+    def __init__(self, local_backend: LocalPI05SuffixBackend, dispatch_delay_ms: float):
+        super().__init__(local_backend, dispatch_delay_s=max(dispatch_delay_ms, 0.0) / 1000.0)
 
 
 class PI05PrefixEmbedder(nn.Module):
@@ -1756,6 +1769,11 @@ class PI05Policy(PreTrainedPolicy):
             return DispatchedNumpyPI05SuffixBackend(self._local_suffix_backend)
         if backend_name == "queued_dispatched_numpy_local":
             return QueuedDispatchedNumpyPI05SuffixBackend(self._local_suffix_backend)
+        if backend_name == "delayed_queued_dispatched_numpy_local":
+            return DelayedQueuedDispatchedNumpyPI05SuffixBackend(
+                self._local_suffix_backend,
+                dispatch_delay_ms=getattr(self.config, "suffix_backend_dispatch_delay_ms", 0.0),
+            )
         raise ValueError(f"Unsupported suffix backend: {backend_name}")
 
     def get_suffix_backend_name(self) -> str:

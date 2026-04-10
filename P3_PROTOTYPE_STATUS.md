@@ -45,7 +45,7 @@ Key interpretation:
 
 ## Prototype Backend Layers
 
-The current prototype supports six suffix backend modes:
+The current prototype supports seven suffix backend modes:
 
 - `local`
 - `dummy_local`
@@ -53,6 +53,7 @@ The current prototype supports six suffix backend modes:
 - `numpy_local`
 - `dispatched_numpy_local`
 - `queued_dispatched_numpy_local`
+- `delayed_queued_dispatched_numpy_local`
 
 ### `local`
 
@@ -160,6 +161,23 @@ Validated:
 - backend name switches correctly
 - comparison result remains exact (`max_abs_diff = 0.0`)
 
+### `delayed_queued_dispatched_numpy_local`
+
+This backend keeps the queued request/response structure but injects a
+configurable artificial transport delay.
+
+Purpose:
+
+- estimate how sensitive the current suffix-only boundary is to extra dispatch latency
+- provide a lightweight stand-in for a slower remote suffix service
+- keep correctness checks inside the same runtime path while adding latency pressure
+
+Validated:
+
+- config override works
+- backend name switches correctly
+- comparison result remains exact (`max_abs_diff = 0.0`)
+
 ## Runtime Validation Mode
 
 The prototype no longer depends only on offline checks.
@@ -178,6 +196,7 @@ Current runtime support:
   - [libero_rocm_p3_proto_numpy.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_numpy.yaml)
   - [libero_rocm_p3_proto_dispatched.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_dispatched.yaml)
   - [libero_rocm_p3_proto_queued.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_queued.yaml)
+  - [libero_rocm_p3_proto_delayed.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_delayed.yaml)
 
 This means `vlash run` can now validate prototype backend correctness during staged inference launches.
 
@@ -260,6 +279,20 @@ The corresponding output bundle is at:
 
 - [summary.md](/home/amd/vlash/outputs/libero_runtime/p3_backend_sweep_with_queued/summary.md)
 
+Latest delayed queued sensitivity check:
+
+| dispatch_delay_ms | max_abs_diff | loop_avg_ms | stage_total_ms | suffix_mean_ms |
+|---|---:|---:|---:|---:|
+| `0` | `0.0` | `1038.33` | `1875.08` | `856.27` |
+| `5` | `0.0` | `1038.05` | `1874.66` | `853.91` |
+| `20` | `0.0` | `1056.47` | `1911.26` | `872.54` |
+
+The corresponding output files are:
+
+- [delayed_sweep_0ms.json](/home/amd/vlash/outputs/libero_runtime/delayed_sweep_0ms.json)
+- [delayed_sweep_5ms.json](/home/amd/vlash/outputs/libero_runtime/delayed_sweep_5ms.json)
+- [delayed_sweep_20ms.json](/home/amd/vlash/outputs/libero_runtime/delayed_sweep_20ms.json)
+
 The corresponding output bundle is at:
 
 - [summary.md](/home/amd/vlash/outputs/libero_runtime/p3_backend_sweep_full/summary.md)
@@ -278,6 +311,7 @@ The current prototype has proved:
 - a queued request/response dispatch path can also preserve correctness
 - multiple prototype backends can now be swept under one simulator config and compared with a shared summary format
 - the current backend ladder, including the queued request/response variant, still shows negligible runtime spread under the same simulator config, which supports using correctness-preserving contract strictness as the main prototype axis for now
+- small artificial dispatch latency (`0-5 ms`) is mostly hidden at the current simulator configuration, while larger injected delay (`20 ms`) starts to move both loop and stage timing upward
 
 ## What The Prototype Has Not Proved
 
