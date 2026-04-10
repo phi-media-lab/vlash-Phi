@@ -2,7 +2,7 @@
 
 # pi05-rocm-vlash
 
-English version: [README.md](/home/amd/vlash/README.md)
+English version: [README.md](README.md)
 
 这个分支是一个面向 AMD ROCm 的 VLASH 本地 bring-up 分支，重点只放在 `pi05` 推理。
 
@@ -48,12 +48,12 @@ English version: [README.md](/home/amd/vlash/README.md)
 
 ## 关键文件
 
-- 状态总览：[ROCM_VLASH_STATUS.md](/home/amd/vlash/ROCM_VLASH_STATUS.md)
-- ROCm 环境脚本：[tools/setup_rocm_env.sh](/home/amd/vlash/tools/setup_rocm_env.sh)
-- ROCm 运行时检查：[tools/check_rocm_runtime.sh](/home/amd/vlash/tools/check_rocm_runtime.sh)
-- ROCm 启动入口：[tools/run_rocm_vlash.sh](/home/amd/vlash/tools/run_rocm_vlash.sh)
-- checkpoint 兼容性检查：[tools/check_checkpoint_compat.py](/home/amd/vlash/tools/check_checkpoint_compat.py)
-- smoke benchmark 配置：[examples/benchmarks/inference_latency_rocm_smoke.yaml](/home/amd/vlash/examples/benchmarks/inference_latency_rocm_smoke.yaml)
+- 状态总览：[ROCM_VLASH_STATUS.md](ROCM_VLASH_STATUS.md)
+- ROCm 环境脚本：[tools/setup_rocm_env.sh](tools/setup_rocm_env.sh)
+- ROCm 运行时检查：[tools/check_rocm_runtime.sh](tools/check_rocm_runtime.sh)
+- ROCm 启动入口：[tools/run_rocm_vlash.sh](tools/run_rocm_vlash.sh)
+- checkpoint 兼容性检查：[tools/check_checkpoint_compat.py](tools/check_checkpoint_compat.py)
+- smoke benchmark 配置：[examples/benchmarks/inference_latency_rocm_smoke.yaml](examples/benchmarks/inference_latency_rocm_smoke.yaml)
 
 ## 快速开始
 

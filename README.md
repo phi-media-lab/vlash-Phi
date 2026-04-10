@@ -2,7 +2,7 @@
 
 # pi05-rocm-vlash
 
-中文说明见：[README.zh-CN.md](/home/amd/vlash/README.zh-CN.md)
+中文说明见：[README.zh-CN.md](README.zh-CN.md)
 
 This branch is a local AMD ROCm bring-up of VLASH focused on `pi05` inference.
 
@@ -48,12 +48,12 @@ This branch was validated on:
 
 ## Key Files
 
-- Status summary: [ROCM_VLASH_STATUS.md](/home/amd/vlash/ROCM_VLASH_STATUS.md)
-- ROCm env bootstrap: [tools/setup_rocm_env.sh](/home/amd/vlash/tools/setup_rocm_env.sh)
-- ROCm runtime check: [tools/check_rocm_runtime.sh](/home/amd/vlash/tools/check_rocm_runtime.sh)
-- ROCm launcher: [tools/run_rocm_vlash.sh](/home/amd/vlash/tools/run_rocm_vlash.sh)
-- Checkpoint compatibility check: [tools/check_checkpoint_compat.py](/home/amd/vlash/tools/check_checkpoint_compat.py)
-- Smoke benchmark config: [examples/benchmarks/inference_latency_rocm_smoke.yaml](/home/amd/vlash/examples/benchmarks/inference_latency_rocm_smoke.yaml)
+- Status summary: [ROCM_VLASH_STATUS.md](ROCM_VLASH_STATUS.md)
+- ROCm env bootstrap: [tools/setup_rocm_env.sh](tools/setup_rocm_env.sh)
+- ROCm runtime check: [tools/check_rocm_runtime.sh](tools/check_rocm_runtime.sh)
+- ROCm launcher: [tools/run_rocm_vlash.sh](tools/run_rocm_vlash.sh)
+- Checkpoint compatibility check: [tools/check_checkpoint_compat.py](tools/check_checkpoint_compat.py)
+- Smoke benchmark config: [examples/benchmarks/inference_latency_rocm_smoke.yaml](examples/benchmarks/inference_latency_rocm_smoke.yaml)
 
 ## Fast Start
 
