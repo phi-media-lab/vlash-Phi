@@ -89,6 +89,7 @@ Current best simulator-backed evidence:
 - `last_action_projected` is now exercised in both mock and simulator paths
 - the first `LIBERO` sweep shows `q2/o1` is the current best simulator-backed candidate
 - the first `LIBERO` sweep also confirms overlap benefit is not monotonic in simulator runtime
+- the longer confirmation sweep keeps `q2/o1` ahead of `q2/o2`
 
 ## Phase Overview
 
@@ -451,6 +452,8 @@ The initial `LIBERO` sweep is now done. Its current recommendation is:
 - `action_quant_ratio=2`
 - `inference_overlap_steps=1`
 
+The longer confirmation sweep supports the same recommendation.
+
 ### Exit Criteria
 
 - simulator-backed runs show stable sync/async behavior across a small parameter grid
@@ -465,7 +468,8 @@ Current status:
 - `vlash run` on simulator in AMD ROCm env: done
 - first simulator sync/async comparison: done
 - first systematic `LIBERO` sweep: done
-- simulator-backed baseline recommendation: in progress
+- confirmation sweep for `q2/o0/o1/o2`: done
+- simulator-backed baseline recommendation: confirmed
 
 ## P3: Prepare Suffix-Only NPU Artifact
 

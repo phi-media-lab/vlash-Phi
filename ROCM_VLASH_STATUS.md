@@ -209,6 +209,7 @@ This is the first simulator-backed evidence that overlap is not only valid in mo
 Follow-up `LIBERO` sweep results are summarized in:
 
 - [outputs/libero_runtime/sweep/summary.md](/home/amd/vlash/outputs/libero_runtime/sweep/summary.md)
+- [outputs/libero_runtime/confirm/summary.md](/home/amd/vlash/outputs/libero_runtime/confirm/summary.md)
 
 The first systematic simulator sweep used:
 
@@ -231,6 +232,18 @@ Best current simulator-backed candidate:
 - `inference_overlap_steps=1`
 
 This candidate preserves async chunk switching while avoiding the small regression seen at `q2/o2`.
+
+The longer confirmation sweep supports the same recommendation:
+
+- `sync q2/o0`, `t=10`: `loop_avg = 256.03 ms`
+- `async q2/o1`, `t=10`: `loop_avg = 260.45 ms`, `chunk_switches = 4`
+- `async q2/o2`, `t=10`: `loop_avg = 265.96 ms`, `chunk_switches = 4`
+
+So the current branch recommendation remains:
+
+- keep `q=2` as the main loop-cadence lever
+- prefer `o=1` over `o=2`
+- treat async value primarily as a scheduling change, not a compute-speed improvement
 
 ### Real-Robot Runtime Compatibility
 
