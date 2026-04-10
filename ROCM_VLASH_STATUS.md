@@ -1,6 +1,6 @@
 # VLASH On AMD ROCm: Status Summary
 
-Last updated: 2026-04-10
+Last updated: 2026-04-11
 
 ## Scope
 
@@ -24,6 +24,7 @@ What is now working:
 - `PI05Policy.from_pretrained(...)` runs real GPU inference on this machine.
 - CLI-level `vlash benchmark` runs end-to-end on AMD GPU with a reproducible ROCm environment.
 - `compile_model=true` works and is the only optimization knob that clearly improves latency on this hardware.
+- `vlash run` now works end to end on both a local mock robot and a real `LIBERO` simulator adapter on AMD ROCm.
 
 What is not true:
 
@@ -163,6 +164,47 @@ Mock runtime sweep results are summarized in:
 - [MOCK_RUNTIME_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_SWEEP.md)
 - [MOCK_RUNTIME_EXTENDED_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_EXTENDED_SWEEP.md)
 - [MOCK_RUNTIME_N4_GRID.md](/home/amd/vlash/MOCK_RUNTIME_N4_GRID.md)
+
+### LIBERO Simulator Validation
+
+Added:
+
+- [vlash/libero_robot.py](/home/amd/vlash/vlash/libero_robot.py)
+- [examples/inference/libero_rocm.yaml](/home/amd/vlash/examples/inference/libero_rocm.yaml)
+
+Updated:
+
+- [vlash/run.py](/home/amd/vlash/vlash/run.py)
+- [vlash/configs/run_config.py](/home/amd/vlash/vlash/configs/run_config.py)
+
+These changes add a `LIBERO`-backed `Robot` adapter so the existing `vlash run` main loop can operate against a simulator without rewriting the runtime around environment-specific code.
+
+Validated states:
+
+- `LIBERO` imports and assets initialize successfully
+- `LiberoEnv` works locally with offscreen MuJoCo rendering
+- `vlash run` works end to end on CPU in the original `vlash` env
+- `vlash run` works end to end on AMD ROCm in `/home/amd/.venvs/vlash-rocm`
+
+Representative AMD ROCm simulator results:
+
+- `n_action_steps=32`, sync:
+  - `loop_avg = 356.02 ms`
+  - `stage_total = 1083.77 ms`
+- `n_action_steps=32`, async `q2/o2`:
+  - `loop_avg = 212.93 ms`
+  - `stage_total = 1108.55 ms`
+  - `chunk_switches = 0`
+- `n_action_steps=8`, sync:
+  - `loop_avg = 503.11 ms`
+  - `stage_total = 1506.57 ms`
+- `n_action_steps=8`, async `q2/o2`:
+  - `loop_avg = 419.30 ms`
+  - `stage_total = 1571.80 ms`
+  - `chunk_switches = 1`
+  - `last_future_state_mode = last_action_projected`
+
+This is the first simulator-backed evidence that overlap is not only valid in mock runtime, but also functionally active in a task environment with real image observations and environment stepping.
 
 ### Real-Robot Runtime Compatibility
 

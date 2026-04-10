@@ -1,6 +1,6 @@
 # pi05-rocm-vlash Plan
 
-Last updated: 2026-04-10
+Last updated: 2026-04-11
 
 ## Purpose
 
@@ -61,20 +61,30 @@ The branch has now partially completed `P1` and `P2`:
 - first mock runtime sweep has been completed
 - extended mock runtime sweep has exercised async chunk switching
 - `n_action_steps=4` grid has shown that overlap benefit is not monotonic
+- a `LIBERO` simulator adapter now exists for the `vlash run` main loop
+- `vlash run` now works on AMD ROCm with a simulator, not only a mock runtime
+- simulator runs show overlap becomes active once chunk length is short enough
 
 The next gap is no longer "can `vlash run` start on AMD ROCm?"
 
 The next gap is:
 
-- validating overlap/chunk handoff under a longer or more demanding runtime
-- then validating the same path with real hardware rather than mock runtime
+- validating overlap/chunk handoff under a longer or more demanding simulator runtime
+- then validating the same path with real hardware rather than simulator or mock runtime
 
 More specifically:
 
 - overlap is now functionally active in mock runtime
+- overlap is now functionally active in `LIBERO` simulation when `n_action_steps` is reduced
 - the remaining unknown is whether it produces a meaningful system-level gain under more realistic timing pressure
 - the current mock evidence suggests the feasible region must obey:
   `inference_overlap_steps * action_quant_ratio <= n_action_steps`
+
+Current best simulator-backed evidence:
+
+- with `n_action_steps=32`, async improves loop cadence but does not yet switch chunks
+- with `n_action_steps=8`, async `q2/o2` produces `chunk_switches=1`
+- `last_action_projected` is now exercised in both mock and simulator paths
 
 ## Phase Overview
 
@@ -368,12 +378,14 @@ Only the real `vlash run` path can validate:
 - `vlash run` launches successfully in the AMD ROCm environment
 - stage timings can be observed in a real runtime loop
 - async overlap and chunk scheduling do not regress relative to the current baseline
+- simulator-backed runs demonstrate the runtime behavior outside the mock-only path
 
 Current status:
 
 - mock `vlash run` launch: done
 - structured stage timings: done
 - first mock sweep: done
+- `LIBERO` simulator adapter and ROCm run path: done
 - real hardware validation: not done
 
 ## P3: Prepare Suffix-Only NPU Artifact

@@ -53,6 +53,7 @@ from lerobot.utils.utils import get_safe_torch_device, init_logging, log_say
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 
 from vlash.configs import RunConfig
+from vlash.libero_robot import LiberoRobot, LiberoRobotConfig
 from vlash.mock_robot import MockRobot, MockRobotConfig
 from vlash.policies.factory import get_policy_class
 from vlash.runtime_stats import stage_timings_to_dict, summarize_stage_timings
@@ -842,6 +843,8 @@ def make_runtime_robot(config) -> Robot:
     """Instantiate either a real robot or the local mock robot."""
     if isinstance(config, MockRobotConfig) or getattr(config, "type", None) == "mock_robot":
         return MockRobot(config)
+    if isinstance(config, LiberoRobotConfig) or getattr(config, "type", None) == "libero_robot":
+        return LiberoRobot(config)
     return make_robot_from_config(config)
 
 
