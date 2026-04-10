@@ -24,11 +24,13 @@ What is already true:
 - `compile_model=true` is the only optimization knob with clear benefit on this machine
 - `fuse_qkv` and `fuse_gate_up` do not provide meaningful gain on this AMD setup
 - the current codebase already exposes natural `prefix / suffix` boundaries inside `PI05Model`
+- staged runtime interfaces exist in both model and runtime layers
+- `vlash run` has been validated in both mock and simulator-backed environments
 
 What is not yet true:
 
-- runtime is still organized around whole-chunk black-box calls
-- future-state-awareness still uses a simplified surrogate
+- a best-known simulator baseline has not yet been fully swept and frozen
+- future-state-awareness still relies on fallback heuristics such as `last_action_projected`
 - `vlash run` has not yet been validated on real robot hardware
 - NPU-oriented work would be premature before runtime boundaries are made explicit
 
@@ -52,7 +54,7 @@ This means:
 
 ## Progress Update
 
-The branch has now partially completed `P1` and `P2`:
+The branch has now completed `P1`, completed mock-backed `P2`, and entered **`P2.5`**:
 
 - staged `PI05` runtime interfaces exist
 - `vlash run` emits structured stage timings
@@ -88,12 +90,13 @@ Current best simulator-backed evidence:
 
 ## Phase Overview
 
-The work will proceed in four phases:
+The work will proceed in five phases:
 
 1. `P0`: Freeze the current ROCm baseline
 2. `P1`: Restructure the no-NPU runtime baseline
-3. `P2`: Validate the real `vlash run` path on AMD GPU
-4. `P3`: Prepare suffix-only NPU artifact after baseline v1 is stable
+3. `P2`: Validate `vlash run` on AMD GPU with mock-backed runtime
+4. `P2.5`: Validate `vlash run` on AMD GPU with simulator-backed runtime
+5. `P3`: Prepare suffix-only NPU artifact after baseline v1 is stable
 
 ## P0: Freeze The Current Baseline
 
@@ -387,6 +390,52 @@ Current status:
 - first mock sweep: done
 - `LIBERO` simulator adapter and ROCm run path: done
 - real hardware validation: not done
+
+## P2.5: Simulator-Backed Runtime Validation
+
+### Goal
+
+Use a real task simulator to validate the same runtime logic that previously only ran in mock mode.
+
+### Why This Exists
+
+`P2` proved that the runtime works on AMD ROCm. `P2.5` exists because mock timing alone is too weak a basis for entering `P3`.
+
+The simulator phase should answer:
+
+- when overlap actually changes chunk scheduling under environment stepping
+- which gains come from `action_quant_ratio` versus overlap
+- which parameter regions are valid and stable before touching NPU-oriented work
+
+### Primary Files
+
+- [vlash/libero_robot.py](/home/amd/vlash/vlash/libero_robot.py)
+- [vlash/run.py](/home/amd/vlash/vlash/run.py)
+- [vlash/configs/run_config.py](/home/amd/vlash/vlash/configs/run_config.py)
+- [examples/inference/libero_rocm.yaml](/home/amd/vlash/examples/inference/libero_rocm.yaml)
+- [outputs/libero_runtime/summary.md](/home/amd/vlash/outputs/libero_runtime/summary.md)
+
+### Required Work
+
+- run a small but systematic sync/async sweep on `LIBERO`
+- freeze a simulator-backed recommended no-NPU baseline
+- document the valid overlap region and any unstable combinations
+- define explicit entry criteria for `P3`
+
+### Exit Criteria
+
+- simulator-backed runs show stable sync/async behavior across a small parameter grid
+- at least one simulator setting demonstrates real chunk switching on AMD ROCm
+- a recommended simulator baseline is documented
+- remaining uncertainty is mostly sim-to-real, not runtime bring-up
+
+Current status:
+
+- `LIBERO` import and asset initialization: done
+- `vlash run` on simulator in CPU env: done
+- `vlash run` on simulator in AMD ROCm env: done
+- first simulator sync/async comparison: done
+- wider simulator sweep and baseline freeze: not done
 
 ## P3: Prepare Suffix-Only NPU Artifact
 
