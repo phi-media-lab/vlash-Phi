@@ -84,6 +84,9 @@ class RunConfig:
     # This also supports duplicating one robot camera into multiple policy inputs.
     camera_feature_map: dict[str, str] = field(default_factory=dict)
 
+    # Optional JSON output path for structured runtime stats emitted by `vlash run`.
+    runtime_stats_output: str | None = None
+
     def __post_init__(self):
         """Parse policy config and validate settings."""
         # Handle policy configuration with CLI override support

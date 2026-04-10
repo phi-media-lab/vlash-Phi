@@ -29,8 +29,10 @@ Usage:
 """
 
 import logging
+import json
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from pprint import pformat
 from copy import copy
 import numpy as np
@@ -586,7 +588,7 @@ def run_loop(
     inference_overlap_steps: int = 0,
     display_data: bool = False,
     control_time_s: int | float = 60,
-):
+) -> dict:
     """Core control loop for real-time robot operation.
     
     Runs the policy on the robot at the specified frequency, managing
@@ -700,6 +702,7 @@ def run_loop(
         ),
     }
     logging.info("VLASH runtime stats: %s", payload)
+    return payload
 
 
 def load_and_compile_policy(cfg: RunConfig) -> PreTrainedPolicy:
@@ -858,7 +861,7 @@ def run(cfg: RunConfig):
 
     try:
         # Run the main control loop
-        run_loop(
+        runtime_stats = run_loop(
             robot=robot,
             events=events,
             fps=cfg.fps,
@@ -871,6 +874,12 @@ def run(cfg: RunConfig):
             display_data=cfg.display_data,
             control_time_s=cfg.control_time_s,
         )
+        if cfg.runtime_stats_output:
+            output_path = Path(cfg.runtime_stats_output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with output_path.open("w") as f:
+                json.dump(runtime_stats, f, indent=2)
+            logging.info("Saved VLASH runtime stats to %s", output_path)
     finally:
         # Cleanup: disconnect robot and stop keyboard listener
         log_say("Stopping VLASH run", cfg.play_sounds, blocking=True)
