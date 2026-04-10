@@ -246,6 +246,20 @@ Latest full sweep summary under one shared simulator config:
 | `numpy_local` | `0.0` | `0.0` | `1024.68` | `1848.43` | `844.20` |
 | `dispatched_numpy_local` | `0.0` | `0.0` | `1035.09` | `1868.56` | `848.03` |
 
+Latest queued-inclusive full sweep summary:
+
+| backend | max_abs_diff | mean_abs_diff | loop_avg_ms | stage_total_ms | suffix_mean_ms |
+|---|---:|---:|---:|---:|---:|
+| `local` | `0.0` | `0.0` | `1054.43` | `1907.20` | `859.32` |
+| `serialized_local` | `0.0` | `0.0` | `1031.21` | `1861.14` | `843.37` |
+| `numpy_local` | `0.0` | `0.0` | `1022.90` | `1844.49` | `844.64` |
+| `dispatched_numpy_local` | `0.0` | `0.0` | `1034.40` | `1867.86` | `845.24` |
+| `queued_dispatched_numpy_local` | `0.0` | `0.0` | `1039.28` | `1877.62` | `850.79` |
+
+The corresponding output bundle is at:
+
+- [summary.md](/home/amd/vlash/outputs/libero_runtime/p3_backend_sweep_with_queued/summary.md)
+
 The corresponding output bundle is at:
 
 - [summary.md](/home/amd/vlash/outputs/libero_runtime/p3_backend_sweep_full/summary.md)
@@ -263,7 +277,7 @@ The current prototype has proved:
 - a dispatched bytes-envelope path can also preserve correctness
 - a queued request/response dispatch path can also preserve correctness
 - multiple prototype backends can now be swept under one simulator config and compared with a shared summary format
-- the current backend ladder still shows negligible runtime spread under the same simulator config, which supports using correctness-preserving contract strictness as the main prototype axis for now
+- the current backend ladder, including the queued request/response variant, still shows negligible runtime spread under the same simulator config, which supports using correctness-preserving contract strictness as the main prototype axis for now
 
 ## What The Prototype Has Not Proved
 
