@@ -59,6 +59,7 @@ The branch has now partially completed `P1` and `P2`:
 - mock robot runtime exists for local `vlash run` validation
 - benchmark and runtime now share the same `stage_timings_ms` structure
 - first mock runtime sweep has been completed
+- extended mock runtime sweep has exercised async chunk switching
 
 The next gap is no longer "can `vlash run` start on AMD ROCm?"
 
@@ -66,6 +67,11 @@ The next gap is:
 
 - validating overlap/chunk handoff under a longer or more demanding runtime
 - then validating the same path with real hardware rather than mock runtime
+
+More specifically:
+
+- overlap is now functionally active in mock runtime
+- the remaining unknown is whether it produces a meaningful system-level gain under more realistic timing pressure
 
 ## Phase Overview
 

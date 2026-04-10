@@ -161,6 +161,7 @@ This means the branch now validates not only CLI benchmark inference, but also t
 Mock runtime sweep results are summarized in:
 
 - [MOCK_RUNTIME_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_SWEEP.md)
+- [MOCK_RUNTIME_EXTENDED_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_EXTENDED_SWEEP.md)
 
 ### Real-Robot Runtime Compatibility
 
@@ -296,7 +297,16 @@ The first mock sweep shows:
 - staged inference time stays roughly constant around `~1.0s`
 - overlap alone does not yet show a strong benefit in this mock setup
 
-For details, see [MOCK_RUNTIME_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_SWEEP.md).
+The extended sweep adds a more important result:
+
+- shorter chunks and longer runs do activate async chunk switching
+- `future_state_mode` transitions from `none` to `last_action_projected`
+- overlap is now functionally validated in the mock runtime, even though it still does not produce a large standalone loop-time improvement
+
+For details, see:
+
+- [MOCK_RUNTIME_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_SWEEP.md)
+- [MOCK_RUNTIME_EXTENDED_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_EXTENDED_SWEEP.md)
 
 ## End-To-End CLI Benchmark Results
 
