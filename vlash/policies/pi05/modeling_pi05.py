@@ -36,6 +36,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
@@ -116,6 +117,24 @@ class SerializedSuffixPayload:
     prefix_device: torch.device
     state: torch.Tensor
     noise: torch.Tensor | None = None
+
+
+@dataclass
+class NumpySerializedSuffixPayload:
+    """Numpy-based suffix payload for stricter prototype boundary testing."""
+
+    prefix_pad_masks: np.ndarray
+    prefix_pad_masks_dtype: str
+    prefix_att_masks: np.ndarray
+    prefix_att_masks_dtype: str
+    prefix_length: int
+    batch_size: int
+    prefix_dtype: str
+    prefix_device: str
+    state: np.ndarray
+    state_dtype: str
+    noise: np.ndarray | None = None
+    noise_dtype: str | None = None
 
 
 class PI05SuffixBackend:
@@ -225,6 +244,82 @@ class SerializedPI05SuffixBackend(PI05SuffixBackend):
         return SuffixRolloutRequest(
             prefix_context=prefix_context,
             noise=restore(payload.noise),
+        )
+
+    def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
+        payload = self.serialize(request)
+        restored_request = self.deserialize(payload)
+        return self.local_backend.run(policy, restored_request)
+
+
+class NumpySerializedPI05SuffixBackend(PI05SuffixBackend):
+    """Prototype backend using numpy payloads for a stricter transport boundary."""
+
+    name = "numpy_local"
+
+    def __init__(self, local_backend: LocalPI05SuffixBackend):
+        self.local_backend = local_backend
+
+    @staticmethod
+    def _dtype_name(dtype: torch.dtype) -> str:
+        return str(dtype).removeprefix("torch.")
+
+    @staticmethod
+    def _dtype_from_name(name: str) -> torch.dtype:
+        return getattr(torch, name)
+
+    def serialize(self, request: SuffixRolloutRequest) -> NumpySerializedSuffixPayload:
+        model_prefix = request.prefix_context.model_prefix_context
+
+        def to_numpy(tensor: torch.Tensor | None) -> np.ndarray | None:
+            if tensor is None:
+                return None
+            cpu_tensor = tensor.detach().to(device="cpu")
+            if cpu_tensor.dtype == torch.bfloat16:
+                cpu_tensor = cpu_tensor.to(torch.float32)
+            return cpu_tensor.numpy().copy()
+
+        return NumpySerializedSuffixPayload(
+            prefix_pad_masks=to_numpy(model_prefix.prefix_pad_masks),
+            prefix_pad_masks_dtype=self._dtype_name(model_prefix.prefix_pad_masks.dtype),
+            prefix_att_masks=to_numpy(model_prefix.prefix_att_masks),
+            prefix_att_masks_dtype=self._dtype_name(model_prefix.prefix_att_masks.dtype),
+            prefix_length=model_prefix.prefix_length,
+            batch_size=model_prefix.batch_size,
+            prefix_dtype=self._dtype_name(model_prefix.dtype),
+            prefix_device=str(model_prefix.device),
+            state=to_numpy(request.prefix_context.state),
+            state_dtype=self._dtype_name(request.prefix_context.state.dtype),
+            noise=to_numpy(request.noise),
+            noise_dtype=None if request.noise is None else self._dtype_name(request.noise.dtype),
+        )
+
+    def deserialize(self, payload: NumpySerializedSuffixPayload) -> SuffixRolloutRequest:
+        device = torch.device(payload.prefix_device)
+
+        def to_tensor(array: np.ndarray | None, *, dtype_name: str | None) -> torch.Tensor | None:
+            if array is None:
+                return None
+            tensor = torch.from_numpy(array).to(device=device)
+            if dtype_name is not None:
+                tensor = tensor.to(dtype=self._dtype_from_name(dtype_name))
+            return tensor
+
+        model_prefix_context = PrefixContext(
+            prefix_pad_masks=to_tensor(payload.prefix_pad_masks, dtype_name=payload.prefix_pad_masks_dtype),
+            prefix_att_masks=to_tensor(payload.prefix_att_masks, dtype_name=payload.prefix_att_masks_dtype),
+            prefix_length=payload.prefix_length,
+            batch_size=payload.batch_size,
+            dtype=self._dtype_from_name(payload.prefix_dtype),
+            device=device,
+        )
+        prefix_context = PolicyPrefixContext(
+            model_prefix_context=model_prefix_context,
+            state=to_tensor(payload.state, dtype_name=payload.state_dtype),
+        )
+        return SuffixRolloutRequest(
+            prefix_context=prefix_context,
+            noise=to_tensor(payload.noise, dtype_name=payload.noise_dtype),
         )
 
     def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
@@ -1537,6 +1632,8 @@ class PI05Policy(PreTrainedPolicy):
             return DummyPI05SuffixBackend(self._local_suffix_backend)
         if backend_name == "serialized_local":
             return SerializedPI05SuffixBackend(self._local_suffix_backend)
+        if backend_name == "numpy_local":
+            return NumpySerializedPI05SuffixBackend(self._local_suffix_backend)
         raise ValueError(f"Unsupported suffix backend: {backend_name}")
 
     def get_suffix_backend_name(self) -> str:
