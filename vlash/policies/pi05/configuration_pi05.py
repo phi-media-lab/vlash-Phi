@@ -151,6 +151,7 @@ class PI05Config(PreTrainedConfig):
     # Attention/MLP fusion (for inference optimization)
     fuse_qkv: bool = False  # Fuse Q/K/V projections
     fuse_gate_up: bool = False  # Fuse gate/up projections in MLP
+    suffix_backend: str = "local"  # Suffix rollout backend: "local" or prototype backends
 
     # === Optimizer Settings ===
     optimizer_lr: float = 2.5e-5  # Peak learning rate

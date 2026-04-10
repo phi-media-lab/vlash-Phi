@@ -136,6 +136,23 @@ class LocalPI05SuffixBackend(PI05SuffixBackend):
         return actions[:, : policy.config.n_action_steps, :]
 
 
+class DummyPI05SuffixBackend(PI05SuffixBackend):
+    """Prototype backend that exercises a non-default backend path.
+
+    The implementation intentionally delegates to the local backend so it can
+    validate backend selection, comparison, and runtime plumbing before any
+    non-local execution is introduced.
+    """
+
+    name = "dummy_local"
+
+    def __init__(self, local_backend: LocalPI05SuffixBackend):
+        self.local_backend = local_backend
+
+    def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
+        return self.local_backend.run(policy, request)
+
+
 class PI05PrefixEmbedder(nn.Module):
     """Embed images and language tokens into prefix sequence.
     
@@ -1257,7 +1274,7 @@ class PI05Policy(PreTrainedPolicy):
         self.language_tokenizer = AutoTokenizer.from_pretrained("google/paligemma-3b-pt-224")
         self.model = PI05Model(config)
         self._local_suffix_backend = LocalPI05SuffixBackend()
-        self.suffix_backend: PI05SuffixBackend = self._local_suffix_backend
+        self.suffix_backend: PI05SuffixBackend = self._make_suffix_backend(config.suffix_backend)
 
         self.reset()
 
@@ -1431,6 +1448,14 @@ class PI05Policy(PreTrainedPolicy):
         """Roll out an action chunk from an existing prefix context."""
         request = SuffixRolloutRequest(prefix_context=prefix_context, noise=noise)
         return self.suffix_backend.run(self, request)
+
+    def _make_suffix_backend(self, backend_name: str) -> PI05SuffixBackend:
+        """Instantiate the configured suffix rollout backend."""
+        if backend_name == "local":
+            return self._local_suffix_backend
+        if backend_name == "dummy_local":
+            return DummyPI05SuffixBackend(self._local_suffix_backend)
+        raise ValueError(f"Unsupported suffix backend: {backend_name}")
 
     def get_suffix_backend_name(self) -> str:
         """Return the active suffix backend name for runtime/reporting."""
