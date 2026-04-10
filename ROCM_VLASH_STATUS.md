@@ -206,6 +206,32 @@ Representative AMD ROCm simulator results:
 
 This is the first simulator-backed evidence that overlap is not only valid in mock runtime, but also functionally active in a task environment with real image observations and environment stepping.
 
+Follow-up `LIBERO` sweep results are summarized in:
+
+- [outputs/libero_runtime/sweep/summary.md](/home/amd/vlash/outputs/libero_runtime/sweep/summary.md)
+
+The first systematic simulator sweep used:
+
+- `policy.n_action_steps=8`
+- `control_time_s=6`
+- `fps=5`
+
+Key findings:
+
+- `action_quant_ratio=2` remains the strongest loop-cadence lever
+- async overlap is now stable enough to trigger `chunk_switches=2` across all async cases
+- async cases consistently exercise `last_action_projected`
+- staged inference total time remains nearly flat, around `1034-1051 ms`
+- overlap benefit is not monotonic
+
+Best current simulator-backed candidate:
+
+- `n_action_steps=8`
+- `action_quant_ratio=2`
+- `inference_overlap_steps=1`
+
+This candidate preserves async chunk switching while avoiding the small regression seen at `q2/o2`.
+
 ### Real-Robot Runtime Compatibility
 
 To make runtime image feature expectations more flexible:

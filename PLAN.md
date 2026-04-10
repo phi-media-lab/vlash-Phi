@@ -87,6 +87,8 @@ Current best simulator-backed evidence:
 - with `n_action_steps=32`, async improves loop cadence but does not yet switch chunks
 - with `n_action_steps=8`, async `q2/o2` produces `chunk_switches=1`
 - `last_action_projected` is now exercised in both mock and simulator paths
+- the first `LIBERO` sweep shows `q2/o1` is the current best simulator-backed candidate
+- the first `LIBERO` sweep also confirms overlap benefit is not monotonic in simulator runtime
 
 ## Phase Overview
 
@@ -439,10 +441,15 @@ The simulator phase should answer:
 
 ### Required Work
 
-- run a small but systematic sync/async sweep on `LIBERO`
 - freeze a simulator-backed recommended no-NPU baseline
 - document the valid overlap region and any unstable combinations
 - define explicit entry criteria for `P3`
+
+The initial `LIBERO` sweep is now done. Its current recommendation is:
+
+- `n_action_steps=8`
+- `action_quant_ratio=2`
+- `inference_overlap_steps=1`
 
 ### Exit Criteria
 
@@ -457,7 +464,8 @@ Current status:
 - `vlash run` on simulator in CPU env: done
 - `vlash run` on simulator in AMD ROCm env: done
 - first simulator sync/async comparison: done
-- wider simulator sweep and baseline freeze: not done
+- first systematic `LIBERO` sweep: done
+- simulator-backed baseline recommendation: in progress
 
 ## P3: Prepare Suffix-Only NPU Artifact
 
