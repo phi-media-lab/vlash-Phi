@@ -1448,6 +1448,15 @@ class PI05Policy(PreTrainedPolicy):
         correctness hook without committing the runtime to any non-local backend
         implementation yet.
         """
+        if noise is None:
+            device = prefix_context.model_prefix_context.device
+            shape = (
+                prefix_context.model_prefix_context.batch_size,
+                self.config.chunk_size,
+                self.config.max_action_dim,
+            )
+            noise = self.model.sample_noise(shape, device)
+
         request = SuffixRolloutRequest(prefix_context=prefix_context, noise=noise)
         backend_actions = self.suffix_backend.run(self, request)
         local_actions = self._local_suffix_backend.run(self, request)
