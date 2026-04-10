@@ -138,6 +138,30 @@ Another official public artifact exists but is not directly usable by the curren
 
 ## Code Changes Made
 
+### Staged Runtime And Mock Run Validation
+
+Added or updated:
+
+- [modeling_pi05.py](/home/amd/vlash/vlash/policies/pi05/modeling_pi05.py)
+- [run.py](/home/amd/vlash/vlash/run.py)
+- [runtime_stats.py](/home/amd/vlash/vlash/runtime_stats.py)
+- [mock_robot.py](/home/amd/vlash/vlash/mock_robot.py)
+- [mock_rocm.yaml](/home/amd/vlash/examples/inference/mock_rocm.yaml)
+- [mock_rocm_async.yaml](/home/amd/vlash/examples/inference/mock_rocm_async.yaml)
+
+These changes introduced:
+
+- explicit staged `PI05` runtime entry points
+- runtime phase timing for `prepare / prefix / suffix / total`
+- mock `vlash run` validation without robot hardware
+- structured JSON output for runtime stats
+
+This means the branch now validates not only CLI benchmark inference, but also the main `vlash run` path in a reproducible local mock environment.
+
+Mock runtime sweep results are summarized in:
+
+- [MOCK_RUNTIME_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_SWEEP.md)
+
 ### Real-Robot Runtime Compatibility
 
 To make runtime image feature expectations more flexible:
@@ -243,6 +267,36 @@ Representative direct results:
 - compiled steady-state call: about `836 ms`
 
 These were direct Python-path checks, not full CLI benchmark runs.
+
+## Mock `vlash run` Runtime Validation
+
+The main `vlash run` path now works in a local mock environment on AMD ROCm.
+
+What is validated:
+
+- policy load
+- compiled warmup
+- camera feature remapping
+- staged runtime timing
+- structured runtime stats output
+
+Example paths:
+
+- [mock_rocm.yaml](/home/amd/vlash/examples/inference/mock_rocm.yaml)
+- [mock_rocm_async.yaml](/home/amd/vlash/examples/inference/mock_rocm_async.yaml)
+
+Representative outputs:
+
+- [mock_rocm_sync_stats.json](/home/amd/vlash/outputs/mock_runtime/mock_rocm_sync_stats.json)
+- [mock_rocm_async_stats.json](/home/amd/vlash/outputs/mock_runtime/mock_rocm_async_stats.json)
+
+The first mock sweep shows:
+
+- system-level loop cadence improves clearly with `action_quant_ratio`
+- staged inference time stays roughly constant around `~1.0s`
+- overlap alone does not yet show a strong benefit in this mock setup
+
+For details, see [MOCK_RUNTIME_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_SWEEP.md).
 
 ## End-To-End CLI Benchmark Results
 
@@ -434,4 +488,3 @@ Most valuable next directions:
 1. Evaluate a smaller policy/checkpoint on AMD ROCm to measure the latency-vs-model-size slope.
 2. Validate the real `vlash run` runtime path on AMD GPU with actual robot hardware or a strong robot stub.
 3. If system-level async behavior matters, evaluate `action_quant_ratio=2/3` only in a real control-loop setting rather than benchmark-only mode.
-

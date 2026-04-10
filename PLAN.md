@@ -29,7 +29,7 @@ What is not yet true:
 
 - runtime is still organized around whole-chunk black-box calls
 - future-state-awareness still uses a simplified surrogate
-- `vlash run` has not yet been validated as the primary AMD runtime path
+- `vlash run` has not yet been validated on real robot hardware
 - NPU-oriented work would be premature before runtime boundaries are made explicit
 
 ## Guiding Decision
@@ -49,6 +49,23 @@ This means:
 - do not prioritize more ROCm micro-tuning now
 - do not prioritize NPU offload now
 - do not treat benchmark-only latency as the final deployment metric
+
+## Progress Update
+
+The branch has now partially completed `P1` and `P2`:
+
+- staged `PI05` runtime interfaces exist
+- `vlash run` emits structured stage timings
+- mock robot runtime exists for local `vlash run` validation
+- benchmark and runtime now share the same `stage_timings_ms` structure
+- first mock runtime sweep has been completed
+
+The next gap is no longer "can `vlash run` start on AMD ROCm?"
+
+The next gap is:
+
+- validating overlap/chunk handoff under a longer or more demanding runtime
+- then validating the same path with real hardware rather than mock runtime
 
 ## Phase Overview
 
@@ -343,6 +360,13 @@ Only the real `vlash run` path can validate:
 - stage timings can be observed in a real runtime loop
 - async overlap and chunk scheduling do not regress relative to the current baseline
 
+Current status:
+
+- mock `vlash run` launch: done
+- structured stage timings: done
+- first mock sweep: done
+- real hardware validation: not done
+
 ## P3: Prepare Suffix-Only NPU Artifact
 
 ### Goal
@@ -427,4 +451,3 @@ That means:
 - keep existing CLI and benchmark commands working
 - add staged runtime interfaces alongside current methods
 - introduce explicit runtime objects without breaking current flow
-
