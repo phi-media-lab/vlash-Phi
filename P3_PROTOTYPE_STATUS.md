@@ -45,11 +45,12 @@ Key interpretation:
 
 ## Prototype Backend Layers
 
-The current prototype supports three suffix backend modes:
+The current prototype supports four suffix backend modes:
 
 - `local`
 - `dummy_local`
 - `serialized_local`
+- `numpy_local`
 
 ### `local`
 
@@ -100,6 +101,26 @@ Validated:
 - runtime can execute with `serialized_local`
 - comparison result is exact (`max_abs_diff = 0.0`)
 
+### `numpy_local`
+
+The strictest current prototype backend.
+
+Purpose:
+
+- serialize the suffix request through CPU `numpy` arrays
+- preserve dtype and device metadata explicitly
+- reconstruct the request on the original device
+- exercise a boundary closer to real cross-process or cross-runtime transport
+
+This extends `serialized_local` by validating that the contract survives a
+less Torch-native transport format.
+
+Validated:
+
+- config override works
+- backend name switches correctly
+- comparison result is exact (`max_abs_diff = 0.0`)
+
 ## Runtime Validation Mode
 
 The prototype no longer depends only on offline checks.
@@ -124,6 +145,11 @@ Representative runtime result:
 }
 ```
 
+This has now been validated in two ways:
+
+- offline prototype comparison via [check_suffix_backend.py](/home/amd/vlash/tools/check_suffix_backend.py)
+- runtime-integrated validation via `suffix_backend_check=true`
+
 ## What The Prototype Has Proved
 
 The current prototype has proved:
@@ -133,6 +159,7 @@ The current prototype has proved:
 - correctness can be compared against the local fallback backend
 - runtime can surface backend correctness in structured stats
 - an explicit serialized payload path can preserve correctness in simulator-backed runtime
+- a stricter `numpy` payload path can also preserve correctness
 
 ## What The Prototype Has Not Proved
 
@@ -158,7 +185,7 @@ It is not yet strong enough to justify:
 The next sensible step is to either:
 
 1. document this prototype state as the current branch checkpoint, or
-2. build one more backend variant that exercises a stricter contract than `serialized_local`
+2. build one more backend variant that exercises a stricter contract than `numpy_local`
 
 The first option is lower risk.
 The second option is higher value if the branch wants to continue deeper into prototype backend design.
