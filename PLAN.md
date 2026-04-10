@@ -352,6 +352,17 @@ P1 is complete when all of the following are true:
 
 Promote `vlash run` from "not yet validated on AMD ROCm" to "measured, usable runtime path."
 
+### Stage Objective
+
+Turn AMD ROCm runtime validation from a benchmark-only result into a runtime-loop result.
+
+By the end of `P2`, the branch should have a working, measurable `vlash run` path with:
+
+- stable startup in the ROCm environment
+- observable stage timings inside the control loop
+- usable sync/async runtime instrumentation
+- enough runtime data to debug loop behavior without relying on benchmark-only measurements
+
 ### Why This Matters
 
 Only the real `vlash run` path can validate:
@@ -396,6 +407,17 @@ Current status:
 ### Goal
 
 Use a real task simulator to validate the same runtime logic that previously only ran in mock mode.
+
+### Stage Objective
+
+Turn the runtime from "works in mock" into "works in a task simulator with real observations and environment stepping."
+
+By the end of `P2.5`, the branch should have:
+
+- a simulator-backed `vlash run` path on AMD ROCm
+- a small but credible sync/async comparison set
+- a documented valid region for `n_action_steps`, `action_quant_ratio`, and `inference_overlap_steps`
+- a simulator-backed recommended no-NPU baseline
 
 ### Why This Exists
 
@@ -442,6 +464,17 @@ Current status:
 ### Goal
 
 Prepare the codebase for suffix-only offload after the no-NPU baseline is clean and measurable.
+
+### Stage Objective
+
+Turn a stable no-NPU runtime baseline into a backend-ready artifact that can later target suffix-only acceleration.
+
+By the end of `P3`, the branch should have:
+
+- a stable suffix boundary and runtime contract
+- a clearly defined prefix/suffix ownership model
+- an implementation path for suffix-only backend execution with correctness fallback
+- enough evidence that the partition target is grounded in a measured baseline rather than guesswork
 
 ### Important Non-Goals
 
