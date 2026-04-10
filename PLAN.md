@@ -477,6 +477,10 @@ Current status:
 
 Prepare the codebase for suffix-only offload after the no-NPU baseline is clean and measurable.
 
+Reference:
+
+- [P3_ENTRY_CRITERIA.md](/home/amd/vlash/P3_ENTRY_CRITERIA.md)
+
 ### Stage Objective
 
 Turn a stable no-NPU runtime baseline into a backend-ready artifact that can later target suffix-only acceleration.
