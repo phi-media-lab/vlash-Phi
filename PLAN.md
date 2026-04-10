@@ -481,6 +481,7 @@ Reference:
 
 - [P3_ENTRY_CRITERIA.md](/home/amd/vlash/P3_ENTRY_CRITERIA.md)
 - [P3_PROTOTYPE_PLAN.md](/home/amd/vlash/P3_PROTOTYPE_PLAN.md)
+- [P3_PROTOTYPE_STATUS.md](/home/amd/vlash/P3_PROTOTYPE_STATUS.md)
 
 ### Stage Objective
 
