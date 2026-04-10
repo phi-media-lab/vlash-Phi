@@ -87,6 +87,55 @@ class PolicyPrefixContext:
     state: torch.Tensor
 
 
+@dataclass
+class SuffixRolloutRequest:
+    """Backend-facing request for suffix-only action rollout."""
+
+    prefix_context: PolicyPrefixContext
+    noise: torch.Tensor | None = None
+
+
+@dataclass
+class SuffixBackendComparison:
+    """Lightweight backend-vs-local comparison summary."""
+
+    backend_name: str
+    max_abs_diff: float
+    mean_abs_diff: float
+
+
+class PI05SuffixBackend:
+    """Abstract suffix rollout backend.
+
+    The default backend remains local and behavior-preserving. This interface
+    exists so a later prototype can replace only the suffix rollout path
+    without changing the runtime call sites again.
+    """
+
+    name = "abstract"
+
+    def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
+        raise NotImplementedError
+
+
+class LocalPI05SuffixBackend(PI05SuffixBackend):
+    """Behavior-preserving local suffix backend."""
+
+    name = "local"
+
+    def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
+        actions = policy.model.rollout_suffix(
+            request.prefix_context.model_prefix_context,
+            request.prefix_context.state,
+            noise=request.noise,
+        )
+
+        original_action_dim = policy.config.action_feature.shape[0]
+        actions = actions[:, :, :original_action_dim]
+        actions = policy.unnormalize_outputs({"action": actions})["action"]
+        return actions[:, : policy.config.n_action_steps, :]
+
+
 class PI05PrefixEmbedder(nn.Module):
     """Embed images and language tokens into prefix sequence.
     
@@ -1207,6 +1256,8 @@ class PI05Policy(PreTrainedPolicy):
         # Initialize tokenizer and model
         self.language_tokenizer = AutoTokenizer.from_pretrained("google/paligemma-3b-pt-224")
         self.model = PI05Model(config)
+        self._local_suffix_backend = LocalPI05SuffixBackend()
+        self.suffix_backend: PI05SuffixBackend = self._local_suffix_backend
 
         self.reset()
 
@@ -1378,19 +1429,34 @@ class PI05Policy(PreTrainedPolicy):
         noise: Tensor | None = None,
     ) -> Tensor:
         """Roll out an action chunk from an existing prefix context."""
-        actions = self.model.rollout_suffix(
-            prefix_context.model_prefix_context,
-            prefix_context.state,
-            noise=noise,
+        request = SuffixRolloutRequest(prefix_context=prefix_context, noise=noise)
+        return self.suffix_backend.run(self, request)
+
+    def get_suffix_backend_name(self) -> str:
+        """Return the active suffix backend name for runtime/reporting."""
+        return self.suffix_backend.name
+
+    @torch.no_grad()
+    def compare_suffix_backend(
+        self,
+        prefix_context: PolicyPrefixContext,
+        noise: Tensor | None = None,
+    ) -> SuffixBackendComparison:
+        """Compare the active backend against the local fallback backend.
+
+        This is intentionally lightweight and prototype-focused: it provides a
+        correctness hook without committing the runtime to any non-local backend
+        implementation yet.
+        """
+        request = SuffixRolloutRequest(prefix_context=prefix_context, noise=noise)
+        backend_actions = self.suffix_backend.run(self, request)
+        local_actions = self._local_suffix_backend.run(self, request)
+        abs_diff = (backend_actions - local_actions).abs()
+        return SuffixBackendComparison(
+            backend_name=self.suffix_backend.name,
+            max_abs_diff=float(abs_diff.max().item()),
+            mean_abs_diff=float(abs_diff.mean().item()),
         )
-
-        # Trim to original action dimension
-        original_action_dim = self.config.action_feature.shape[0]
-        actions = actions[:, :, :original_action_dim]
-
-        actions = self.unnormalize_outputs({"action": actions})["action"]
-
-        return actions[:, : self.config.n_action_steps, :]
 
     @torch.no_grad()
     def select_action(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
