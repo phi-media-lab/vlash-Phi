@@ -162,6 +162,7 @@ Mock runtime sweep results are summarized in:
 
 - [MOCK_RUNTIME_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_SWEEP.md)
 - [MOCK_RUNTIME_EXTENDED_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_EXTENDED_SWEEP.md)
+- [MOCK_RUNTIME_N4_GRID.md](/home/amd/vlash/MOCK_RUNTIME_N4_GRID.md)
 
 ### Real-Robot Runtime Compatibility
 
@@ -303,10 +304,18 @@ The extended sweep adds a more important result:
 - `future_state_mode` transitions from `none` to `last_action_projected`
 - overlap is now functionally validated in the mock runtime, even though it still does not produce a large standalone loop-time improvement
 
+The `n_action_steps=4` grid adds the clearest mock-runtime result so far:
+
+- async overlap repeatedly triggers chunk switching
+- overlap benefit is not monotonic
+- the effective tuning constraint is:
+  `effective_overlap_steps = inference_overlap_steps * action_quant_ratio <= n_action_steps`
+
 For details, see:
 
 - [MOCK_RUNTIME_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_SWEEP.md)
 - [MOCK_RUNTIME_EXTENDED_SWEEP.md](/home/amd/vlash/MOCK_RUNTIME_EXTENDED_SWEEP.md)
+- [MOCK_RUNTIME_N4_GRID.md](/home/amd/vlash/MOCK_RUNTIME_N4_GRID.md)
 
 ## End-To-End CLI Benchmark Results
 

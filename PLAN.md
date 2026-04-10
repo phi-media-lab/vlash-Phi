@@ -60,6 +60,7 @@ The branch has now partially completed `P1` and `P2`:
 - benchmark and runtime now share the same `stage_timings_ms` structure
 - first mock runtime sweep has been completed
 - extended mock runtime sweep has exercised async chunk switching
+- `n_action_steps=4` grid has shown that overlap benefit is not monotonic
 
 The next gap is no longer "can `vlash run` start on AMD ROCm?"
 
@@ -72,6 +73,8 @@ More specifically:
 
 - overlap is now functionally active in mock runtime
 - the remaining unknown is whether it produces a meaningful system-level gain under more realistic timing pressure
+- the current mock evidence suggests the feasible region must obey:
+  `inference_overlap_steps * action_quant_ratio <= n_action_steps`
 
 ## Phase Overview
 
