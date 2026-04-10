@@ -27,6 +27,14 @@ policy:
 # Task description passed to the policy
 single_task: <task description>
 
+# Optional: remap or duplicate robot cameras into the image feature names
+# expected by the checkpoint. Keys are policy image features, values are
+# robot camera names or full observation image feature names.
+# Example for mit-han-lab/vlash-pi05-libero-async5 with a single wrist camera:
+# camera_feature_map:
+#   image: wrist
+#   wrist_image: wrist
+
 # Control parameters
 fps: 30  # Control loop frequency (Hz)
 control_time_s: 600  # Total runtime (seconds)

@@ -17,7 +17,7 @@
 """VLASH Runtime/Inference Configuration.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Union
 
 from lerobot.configs import parser
@@ -73,6 +73,15 @@ class RunConfig:
 
     # Task description passed to policy
     single_task: Union[str, None] = None
+
+    # Optional image feature remapping from policy input feature -> robot camera.
+    # Keys and values may be either full feature names:
+    #   observation.images.image: observation.images.wrist
+    # or short camera names:
+    #   image: wrist
+    #
+    # This also supports duplicating one robot camera into multiple policy inputs.
+    camera_feature_map: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         """Parse policy config and validate settings."""

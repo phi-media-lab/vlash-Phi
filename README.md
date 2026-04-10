@@ -47,6 +47,43 @@ pip install -e .
 pip install -U torch torchvision torchcodec
 ```
 
+### ROCm On AMD GPUs
+
+This repository can run inference on ROCm-backed AMD GPUs, but it is not a zero-config path.
+On this machine, the working setup is:
+
+- ROCm runtime in `/opt/rocm-7.2.1`
+- Python venv in `/home/amd/.venvs/rocm-probe-312`
+- `torch 2.9.1+rocm7.2.1`
+
+Use the helper scripts in [tools/run_rocm_vlash.sh](/home/amd/vlash/tools/run_rocm_vlash.sh) and [tools/check_rocm_runtime.sh](/home/amd/vlash/tools/check_rocm_runtime.sh):
+
+```bash
+tools/setup_rocm_env.sh
+tools/check_rocm_runtime.sh
+tools/run_rocm_vlash.sh --help
+```
+
+To run the local ROCm smoke benchmark against the public PI0.5 checkpoint:
+
+```bash
+tools/run_rocm_vlash.sh benchmark examples/benchmarks/inference_latency_rocm_smoke.yaml \
+  --policy.path=/home/amd/.cache/vlash/models/vlash-pi05-libero-async5
+```
+
+To enable the experimental ROCm attention kernels on current AMD GPUs:
+
+```bash
+ROCM_EXPERIMENTAL_ATTENTION=1 tools/run_rocm_vlash.sh benchmark \
+  examples/benchmarks/inference_latency_rocm_smoke.yaml \
+  --policy.path=/home/amd/.cache/vlash/models/vlash-pi05-libero-async5
+```
+
+Notes:
+
+- The current LeRobot dependency line in [pyproject.toml](/home/amd/vlash/pyproject.toml) targets older PyTorch versions than the working ROCm stack above.
+- The ROCm smoke benchmark is a compatibility check, not a task-faithful evaluation. It adapts `lerobot/pusht` image/state features to the public LIBERO checkpoint so the end-to-end CLI path can be exercised.
+
 ### Quick Examples
 
 **Fine-tune a VLA policy for your task, enabling smooth async inference without overhead:**

@@ -55,6 +55,31 @@ from vlash.policies.factory import get_policy_class
 from vlash.utils import prepare_observation_for_inference
 
 
+def normalize_image_feature_name(name: str) -> str:
+    """Normalize short camera names into observation image feature names."""
+    return name if name.startswith(f"{OBS_IMAGES}.") else f"{OBS_IMAGES}.{name}"
+
+
+def apply_policy_image_mapping(
+    observation: dict[str, np.ndarray],
+    image_feature_map: dict[str, str],
+) -> dict[str, np.ndarray]:
+    """Copy robot image observations into the keys expected by the policy."""
+    if not image_feature_map:
+        return observation
+
+    mapped = copy(observation)
+    for target_key, source_key in image_feature_map.items():
+        if source_key not in mapped:
+            raise ValueError(
+                f"Mapped source image feature {source_key!r} is missing from observation "
+                f"(available keys: {sorted(mapped.keys())})"
+            )
+        mapped[target_key] = mapped[source_key]
+
+    return mapped
+
+
 class VLASHAsyncManager:
     """Manages asynchronous action chunk execution for VLASH inference.
     
@@ -91,6 +116,7 @@ class VLASHAsyncManager:
         robot: Robot,
         single_task: str | None,
         overlap_steps: int,
+        image_feature_map: dict[str, str] | None = None,
     ):
         """Initialize the async manager.
         
@@ -107,6 +133,7 @@ class VLASHAsyncManager:
         self.single_task = single_task
         self.n_action_steps = policy.config.n_action_steps
         self.overlap_steps = overlap_steps
+        self.image_feature_map = image_feature_map or {}
         
         # Chunk state management
         self.current_chunk: np.ndarray | None = None  # Currently executing (on CPU)
@@ -191,6 +218,7 @@ class VLASHAsyncManager:
             Predicted action chunk as a torch tensor [n_action_steps, action_dim].
         """
         observation = copy(observation)
+        observation = apply_policy_image_mapping(observation, self.image_feature_map)
         
         # Future state awareness: use future state instead of current state
         last_action = self.current_chunk[self.n_action_steps - 1] if self.current_chunk is not None else None
@@ -246,7 +274,11 @@ class VLASHAsyncManager:
         return action
 
 
-def validate_robot_cameras(robot: Robot, policy_config: PreTrainedConfig):
+def validate_robot_cameras(
+    robot: Robot,
+    policy_config: PreTrainedConfig,
+    camera_feature_map: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Validate that robot cameras match policy expectations.
     
     Ensures the robot's camera configuration exactly matches what the
@@ -256,8 +288,12 @@ def validate_robot_cameras(robot: Robot, policy_config: PreTrainedConfig):
         robot: Connected robot instance.
         policy_config: Configuration of the pretrained policy.
         
+    Returns:
+        Mapping from policy image feature name to robot image feature name.
+
     Raises:
-        ValueError: If camera names don't match between robot and policy.
+        ValueError: If policy image features cannot be satisfied by robot cameras
+            after applying the optional remapping.
     """
     # Build set of robot camera feature names (with observation.images prefix)
     robot_camera_names = set(robot.cameras.keys())
@@ -271,15 +307,52 @@ def validate_robot_cameras(robot: Robot, policy_config: PreTrainedConfig):
         )
 
     policy_camera_features = set(policy_image_features.keys())
+    normalized_camera_map = {
+        normalize_image_feature_name(target): normalize_image_feature_name(source)
+        for target, source in (camera_feature_map or {}).items()
+    }
 
-    # Strict match required
-    if robot_image_features != policy_camera_features:
+    unknown_targets = sorted(set(normalized_camera_map) - policy_camera_features)
+    unknown_sources = sorted(set(normalized_camera_map.values()) - robot_image_features)
+    if unknown_targets or unknown_sources:
         raise ValueError(
-            "Robot camera names must exactly match policy image feature names!\n"
+            "Invalid camera_feature_map.\n"
+            f"Unknown policy image targets: {unknown_targets or '[]'}\n"
+            f"Unknown robot image sources: {unknown_sources or '[]'}\n"
+            f"Robot cameras (with prefix): {sorted(robot_image_features)}\n"
+            f"Policy image features: {sorted(policy_camera_features)}"
+        )
+
+    resolved_image_map: dict[str, str] = {}
+    missing_targets: list[str] = []
+    for target_feature in sorted(policy_camera_features):
+        if target_feature in normalized_camera_map:
+            resolved_image_map[target_feature] = normalized_camera_map[target_feature]
+        elif target_feature in robot_image_features:
+            resolved_image_map[target_feature] = target_feature
+        else:
+            missing_targets.append(target_feature)
+
+    if missing_targets:
+        raise ValueError(
+            "Robot cameras do not satisfy policy image features.\n"
             f"Robot cameras (with prefix): {sorted(robot_image_features)}\n"
             f"Policy image features: {sorted(policy_camera_features)}\n"
-            "Please ensure camera configuration matches the trained model."
+            f"Missing policy image features after remapping: {missing_targets}\n"
+            "Add `camera_feature_map` in the run config to rename or duplicate robot cameras, for example:\n"
+            "camera_feature_map:\n"
+            "  image: wrist\n"
+            "  wrist_image: wrist"
         )
+
+    if resolved_image_map != {feature: feature for feature in sorted(policy_camera_features)}:
+        logging.info("Using camera feature remapping: %s", resolved_image_map)
+
+    unused_robot_features = sorted(robot_image_features - set(resolved_image_map.values()))
+    if unused_robot_features:
+        logging.info("Ignoring extra robot image features not used by the policy: %s", unused_robot_features)
+
+    return resolved_image_map
 
 
 @torch.inference_mode()
@@ -290,6 +363,7 @@ def run_loop(
     dataset_features: dict[str, dict],
     policy: PreTrainedPolicy,
     single_task: str | None,
+    image_feature_map: dict[str, str] | None = None,
     action_quant_ratio: int = 1,
     inference_overlap_steps: int = 0,
     display_data: bool = False,
@@ -325,6 +399,7 @@ def run_loop(
         robot=robot,
         single_task=single_task,
         overlap_steps=effective_overlap_steps,
+        image_feature_map=image_feature_map,
     )
 
     step_count = 0
@@ -413,7 +488,18 @@ def warmup_compiled_policy(
     
     # Add dummy image observations with correct shape [B, C, H, W]
     for img_key, img_feature in policy.config.image_features.items():
-        channels, height, width = img_feature.shape
+        shape = tuple(img_feature.shape)
+        if len(shape) != 3:
+            raise ValueError(f"Expected 3D image feature shape for {img_key}, got {shape}")
+
+        # Checkpoint configs may store image shapes as either CHW or HWC.
+        if shape[0] in (1, 3) and shape[0] < shape[1] and shape[0] < shape[2]:
+            channels, height, width = shape
+        elif shape[-1] in (1, 3):
+            height, width, channels = shape
+        else:
+            channels, height, width = shape
+
         dummy_obs[img_key] = torch.zeros(
             (1, channels, height, width),
             dtype=torch.float32,
@@ -489,7 +575,7 @@ def run(cfg: RunConfig):
     # Setup robot and validate camera configuration
     robot = make_robot_from_config(cfg.robot)
     original_policy_config = PreTrainedConfig.from_pretrained(cfg.policy.pretrained_path)
-    validate_robot_cameras(robot, original_policy_config)
+    image_feature_map = validate_robot_cameras(robot, original_policy_config, cfg.camera_feature_map)
 
     # Load policy and prepare feature definitions
     policy = load_and_compile_policy(cfg)
@@ -510,6 +596,7 @@ def run(cfg: RunConfig):
             dataset_features=dataset_features,
             policy=policy,
             single_task=cfg.single_task,
+            image_feature_map=image_feature_map,
             action_quant_ratio=cfg.action_quant_ratio,
             inference_overlap_steps=cfg.inference_overlap_steps,
             display_data=cfg.display_data,

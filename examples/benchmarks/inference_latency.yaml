@@ -22,6 +22,11 @@ dataset:
   repo_id: lerobot/pusht # Change to your dataset
   streaming: false
 
+# Optional image remapping when checkpoint image features do not match dataset feature names.
+# image_feature_map:
+#   observation.images.image: observation.image
+#   observation.images.wrist_image: observation.image
+
 
 # Number of samples to measure 
 num_samples: 16
@@ -39,4 +44,3 @@ seed: 42
 
 # Required by TrainPipelineConfig but not used for benchmarking
 output_dir: outputs/benchmarks/inference_latency/pi05
-

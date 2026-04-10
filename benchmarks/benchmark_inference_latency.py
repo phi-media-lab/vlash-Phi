@@ -20,14 +20,17 @@
 import json
 import logging
 import time
+from copy import copy
 from pathlib import Path
 from pprint import pformat
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from lerobot.configs import parser
+from lerobot.configs.types import FeatureType
 from lerobot.datasets.factory import resolve_delta_timestamps
 from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -83,10 +86,17 @@ def load_policy(cfg: BenchmarkConfig, ds_meta: LeRobotDatasetMetadata) -> PreTra
     """
     logging.info(f"Loading policy type: {cfg.policy.type}")
     
-    policy = make_policy(
-        cfg=cfg.policy,
-        ds_meta=ds_meta,
-    )
+    policy_cls = get_policy_class(cfg.policy.type)
+    if cfg.policy.pretrained_path:
+        policy = policy_cls.from_pretrained(
+            pretrained_name_or_path=cfg.policy.pretrained_path,
+            config=cfg.policy,
+        )
+    else:
+        policy = make_policy(
+            cfg=cfg.policy,
+            ds_meta=ds_meta,
+        )
     
     policy.eval()
     
@@ -96,7 +106,129 @@ def load_policy(cfg: BenchmarkConfig, ds_meta: LeRobotDatasetMetadata) -> PreTra
     return policy
 
 
-def prepare_batch(batch: dict, device: torch.device) -> dict:
+def apply_image_feature_map(batch: dict, image_feature_map: dict[str, str]) -> dict:
+    """Copy dataset image tensors into the keys expected by the policy."""
+    if not image_feature_map:
+        return batch
+
+    mapped = copy(batch)
+    for target_key, source_key in image_feature_map.items():
+        if source_key not in mapped:
+            raise ValueError(
+                f"Mapped source image feature {source_key!r} is missing from benchmark batch "
+                f"(available keys: {sorted(mapped.keys())})"
+            )
+        mapped[target_key] = mapped[source_key]
+
+    return mapped
+
+
+def validate_image_feature_map(
+    cfg: BenchmarkConfig,
+    policy: PreTrainedPolicy,
+    dataset: LeRobotDataset,
+) -> None:
+    """Validate that dataset image features satisfy the policy inputs."""
+    policy_image_features = getattr(policy.config, "image_features", {})
+    if not isinstance(policy_image_features, dict):
+        raise ValueError(
+            f"Policy image_features must be a dict, got {type(policy_image_features)}: {policy_image_features}"
+        )
+
+    dataset_features = set(dataset.features)
+    image_feature_map = cfg.image_feature_map or {}
+
+    unknown_targets = sorted(set(image_feature_map) - set(policy_image_features))
+    unknown_sources = sorted(set(image_feature_map.values()) - dataset_features)
+    if unknown_targets or unknown_sources:
+        raise ValueError(
+            "Invalid image_feature_map.\n"
+            f"Unknown policy image targets: {unknown_targets or '[]'}\n"
+            f"Unknown dataset image sources: {unknown_sources or '[]'}\n"
+            f"Dataset features: {sorted(dataset_features)}\n"
+            f"Policy image features: {sorted(policy_image_features)}"
+        )
+
+    missing_targets: list[str] = []
+    resolved_image_map: dict[str, str] = {}
+    for target_feature in sorted(policy_image_features):
+        if target_feature in image_feature_map:
+            resolved_image_map[target_feature] = image_feature_map[target_feature]
+        elif target_feature in dataset_features:
+            resolved_image_map[target_feature] = target_feature
+        else:
+            missing_targets.append(target_feature)
+
+    if missing_targets:
+        raise ValueError(
+            "Dataset features do not satisfy policy image features.\n"
+            f"Dataset features: {sorted(dataset_features)}\n"
+            f"Policy image features: {sorted(policy_image_features)}\n"
+            f"Missing policy image features after remapping: {missing_targets}\n"
+            "Add `image_feature_map` in the benchmark config, for example:\n"
+            "image_feature_map:\n"
+            "  observation.images.image: observation.image\n"
+            "  observation.images.wrist_image: observation.image"
+        )
+
+    if resolved_image_map != {feature: feature for feature in sorted(policy_image_features)}:
+        logging.info("Using benchmark image feature remapping: %s", resolved_image_map)
+
+
+def adapt_state_features(batch: dict, policy: PreTrainedPolicy) -> dict:
+    """Pad or truncate state tensors to the dimensions expected by the policy.
+
+    This keeps latency smoke tests running even when the benchmark dataset and
+    checkpoint were trained with different state layouts.
+    """
+    adapted = dict(batch)
+    input_features = getattr(policy.config, "input_features", {}) or {}
+
+    for key, feature in input_features.items():
+        if key not in adapted or feature.type is not FeatureType.STATE:
+            continue
+
+        tensor = adapted[key]
+        if not isinstance(tensor, torch.Tensor) or tensor.ndim == 0:
+            continue
+
+        target_dim = feature.shape[0]
+        current_dim = tensor.shape[-1]
+        if current_dim == target_dim:
+            continue
+
+        if current_dim < target_dim:
+            adapted[key] = F.pad(tensor, (0, target_dim - current_dim))
+        else:
+            adapted[key] = tensor[..., :target_dim]
+
+    return adapted
+
+
+def log_state_feature_adaptation(policy: PreTrainedPolicy, dataset: LeRobotDataset) -> None:
+    """Log state-shape mismatches that will be adapted during benchmarking."""
+    input_features = getattr(policy.config, "input_features", {}) or {}
+    for key, feature in input_features.items():
+        if feature.type is not FeatureType.STATE or key not in dataset.features:
+            continue
+
+        dataset_shape = tuple(dataset.features[key]["shape"])
+        policy_shape = tuple(feature.shape)
+        if dataset_shape != policy_shape:
+            logging.info(
+                "Adapting benchmark state feature %s from dataset shape %s to policy shape %s",
+                key,
+                dataset_shape,
+                policy_shape,
+            )
+
+
+def prepare_batch(
+    batch: dict,
+    device: torch.device,
+    policy: PreTrainedPolicy,
+    image_feature_map: dict[str, str] | None = None,
+) -> dict:
     """Move batch tensors to device.
     
     Also converts language_instruction to task field expected by policy.
@@ -108,6 +240,8 @@ def prepare_batch(batch: dict, device: torch.device) -> dict:
     Returns:
         Prepared batch dictionary.
     """
+    batch = apply_image_feature_map(batch, image_feature_map or {})
+    batch = adapt_state_features(batch, policy)
     prepared = {}
     for k, v in batch.items():
         if isinstance(v, torch.Tensor):
@@ -139,7 +273,7 @@ def warmup_model(
             if i >= cfg.warmup_steps:
                 break
             
-            batch = prepare_batch(batch, device)
+            batch = prepare_batch(batch, device, policy, cfg.image_feature_map)
             _ = policy.predict_action_chunk(batch)
     
     # Ensure warmup is complete before starting benchmark
@@ -166,7 +300,7 @@ def benchmark_inference_latency_impl(
             if i >= cfg.num_samples:
                 break
             
-            batch = prepare_batch(batch, device)
+            batch = prepare_batch(batch, device, policy, cfg.image_feature_map)
             
             # Synchronize before timing for accurate GPU measurement
             if device.type == "cuda":
@@ -298,6 +432,8 @@ def benchmark_inference_latency(cfg: BenchmarkConfig):
     )
     
     policy = load_policy(cfg, ds_meta)
+    validate_image_feature_map(cfg, policy, dataset)
+    log_state_feature_adaptation(policy, dataset)
     
     # Warmup
     warmup_model(policy, dataloader, cfg)

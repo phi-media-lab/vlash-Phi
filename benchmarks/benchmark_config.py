@@ -18,9 +18,12 @@
 This module defines the configuration for VLASH benchmarks.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Union
 
+from lerobot.configs import parser
+from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.train import TrainPipelineConfig
 
 
@@ -46,13 +49,32 @@ class BenchmarkConfig(TrainPipelineConfig):
     # Optional output file for JSON results
     output_file: Union[str, None] = None
 
+    # Optional mapping from policy image feature names to dataset image feature names.
+    # Example:
+    # image_feature_map:
+    #   observation.images.image: observation.image
+    #   observation.images.wrist_image: observation.image
+    image_feature_map: dict[str, str] = field(default_factory=dict)
+
     def validate(self) -> None:
         """Validate benchmark-specific configuration.
         
         Overrides parent to skip training-specific validation.
         """
+        policy_path = parser.get_path_arg("policy")
+        if policy_path:
+            cli_overrides = parser.get_cli_overrides("policy")
+            self.policy = PreTrainedConfig.from_pretrained(policy_path, cli_overrides=cli_overrides)
+            self.policy.pretrained_path = Path(policy_path)
+
         if self.type not in ["inference_latency"]:
             raise ValueError(f"Invalid benchmark type: {self.type}.")
+
+        if self.policy is None:
+            raise ValueError(
+                "Policy is not configured. Please specify a pretrained policy with "
+                "`--policy.path=...` or set `policy.pretrained_path` in the benchmark config."
+            )
         
         if self.num_samples <= 0:
             raise ValueError("num_samples must be positive")

@@ -1,0 +1,30 @@
+# ROCm smoke benchmark for local VLASH validation on AMD GPUs.
+# Use with:
+#   tools/run_rocm_vlash.sh benchmark examples/benchmarks/inference_latency_rocm_smoke.yaml \
+#     --policy.path=/home/amd/.cache/vlash/models/vlash-pi05-libero-async5
+
+type: inference_latency
+
+policy:
+  type: pi05
+  device: cuda
+  dtype: bfloat16
+  compile_model: false
+  fuse_qkv: false
+  fuse_gate_up: false
+
+dataset:
+  repo_id: lerobot/pusht
+  streaming: false
+
+# Map dataset image tensors into the keys expected by the public LIBERO checkpoint.
+image_feature_map:
+  observation.images.image: observation.image
+  observation.images.wrist_image: observation.image
+
+num_samples: 1
+warmup_steps: 0
+batch_size: 1
+num_workers: 0
+seed: 42
+output_dir: outputs/benchmarks/inference_latency/pi05_rocm_smoke
