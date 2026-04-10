@@ -134,6 +134,7 @@ Current runtime support:
   - latest `mean_abs_diff`
 - ready-to-run prototype config:
   - [libero_rocm_p3_proto.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto.yaml)
+  - [libero_rocm_p3_proto_numpy.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_numpy.yaml)
 
 This means `vlash run` can now validate prototype backend correctness during staged inference launches.
 
@@ -158,6 +159,14 @@ Minimal runtime entry point:
 VENV_DIR=/home/amd/.venvs/vlash-rocm \
 LIBERO_CONFIG_PATH=/home/amd/.libero \
 tools/run_rocm_vlash.sh run examples/inference/libero_rocm_p3_proto.yaml
+```
+
+Stricter numpy-payload runtime entry point:
+
+```bash
+VENV_DIR=/home/amd/.venvs/vlash-rocm \
+LIBERO_CONFIG_PATH=/home/amd/.libero \
+tools/run_rocm_vlash.sh run examples/inference/libero_rocm_p3_proto_numpy.yaml
 ```
 
 ## What The Prototype Has Proved
