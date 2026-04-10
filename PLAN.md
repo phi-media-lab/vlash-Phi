@@ -480,6 +480,7 @@ Prepare the codebase for suffix-only offload after the no-NPU baseline is clean 
 Reference:
 
 - [P3_ENTRY_CRITERIA.md](/home/amd/vlash/P3_ENTRY_CRITERIA.md)
+- [P3_PROTOTYPE_PLAN.md](/home/amd/vlash/P3_PROTOTYPE_PLAN.md)
 
 ### Stage Objective
 
