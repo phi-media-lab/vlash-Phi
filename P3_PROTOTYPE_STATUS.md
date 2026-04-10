@@ -149,6 +149,8 @@ The prototype no longer depends only on offline checks.
 Current runtime support:
 
 - `suffix_backend_check=true` in [run_config.py](/home/amd/vlash/vlash/configs/run_config.py)
+- offline comparison helper: [check_suffix_backend.py](/home/amd/vlash/tools/check_suffix_backend.py)
+- multi-backend sweep helper: [sweep_suffix_backends.py](/home/amd/vlash/tools/sweep_suffix_backends.py)
 - runtime stats now include:
   - backend name
   - latest `max_abs_diff`
@@ -199,6 +201,15 @@ LIBERO_CONFIG_PATH=/home/amd/.libero \
 tools/run_rocm_vlash.sh run examples/inference/libero_rocm_p3_proto_dispatched.yaml
 ```
 
+Prototype backend sweep entry point:
+
+```bash
+VENV_DIR=/home/amd/.venvs/vlash-rocm \
+LIBERO_CONFIG_PATH=/home/amd/.libero \
+python tools/sweep_suffix_backends.py \
+  examples/inference/libero_rocm_p3_proto_dispatched.yaml
+```
+
 ## What The Prototype Has Proved
 
 The current prototype has proved:
@@ -210,6 +221,7 @@ The current prototype has proved:
 - an explicit serialized payload path can preserve correctness in simulator-backed runtime
 - a stricter `numpy` payload path can also preserve correctness
 - a dispatched bytes-envelope path can also preserve correctness
+- multiple prototype backends can now be swept under one simulator config and compared with a shared summary format
 
 ## What The Prototype Has Not Proved
 

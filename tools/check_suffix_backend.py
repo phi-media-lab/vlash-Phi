@@ -46,12 +46,14 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional path to write comparison payload as JSON",
     )
-    return parser.parse_args()
+    args, overrides = parser.parse_known_args()
+    args.overrides = overrides
+    return args
 
 
 def main() -> None:
     args = parse_args()
-    cfg = draccus.parse(RunConfig, config_path=args.config_path, args=[])
+    cfg = draccus.parse(RunConfig, config_path=args.config_path, args=args.overrides)
 
     policy_cls = get_policy_class(cfg.policy.type)
     policy = policy_cls.from_pretrained(cfg.policy.pretrained_path, config=cfg.policy)
