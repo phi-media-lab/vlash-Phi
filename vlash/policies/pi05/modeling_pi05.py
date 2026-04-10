@@ -104,6 +104,20 @@ class SuffixBackendComparison:
     mean_abs_diff: float
 
 
+@dataclass
+class SerializedSuffixPayload:
+    """Serializable suffix request payload for prototype backends."""
+
+    prefix_pad_masks: torch.Tensor
+    prefix_att_masks: torch.Tensor
+    prefix_length: int
+    batch_size: int
+    prefix_dtype: torch.dtype
+    prefix_device: torch.device
+    state: torch.Tensor
+    noise: torch.Tensor | None = None
+
+
 class PI05SuffixBackend:
     """Abstract suffix rollout backend.
 
@@ -151,6 +165,72 @@ class DummyPI05SuffixBackend(PI05SuffixBackend):
 
     def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
         return self.local_backend.run(policy, request)
+
+
+class SerializedPI05SuffixBackend(PI05SuffixBackend):
+    """Prototype backend that exercises explicit payload serialization.
+
+    This simulates a non-local backend boundary by:
+    1. packing the suffix request into a serializable payload
+    2. moving that payload through CPU tensors
+    3. reconstructing runtime objects on the original device
+    4. delegating actual execution to the current local rollout path
+    """
+
+    name = "serialized_local"
+
+    def __init__(self, local_backend: LocalPI05SuffixBackend):
+        self.local_backend = local_backend
+
+    def serialize(self, request: SuffixRolloutRequest) -> SerializedSuffixPayload:
+        model_prefix = request.prefix_context.model_prefix_context
+
+        def cpu_clone(tensor: torch.Tensor | None) -> torch.Tensor | None:
+            if tensor is None:
+                return None
+            return tensor.detach().to(device="cpu").clone()
+
+        return SerializedSuffixPayload(
+            prefix_pad_masks=cpu_clone(model_prefix.prefix_pad_masks),
+            prefix_att_masks=cpu_clone(model_prefix.prefix_att_masks),
+            prefix_length=model_prefix.prefix_length,
+            batch_size=model_prefix.batch_size,
+            prefix_dtype=model_prefix.dtype,
+            prefix_device=model_prefix.device,
+            state=cpu_clone(request.prefix_context.state),
+            noise=cpu_clone(request.noise),
+        )
+
+    def deserialize(self, payload: SerializedSuffixPayload) -> SuffixRolloutRequest:
+        def restore(tensor: torch.Tensor | None, *, dtype: torch.dtype | None = None) -> torch.Tensor | None:
+            if tensor is None:
+                return None
+            restored = tensor.to(device=payload.prefix_device)
+            if dtype is not None:
+                restored = restored.to(dtype=dtype)
+            return restored
+
+        model_prefix_context = PrefixContext(
+            prefix_pad_masks=restore(payload.prefix_pad_masks),
+            prefix_att_masks=restore(payload.prefix_att_masks, dtype=payload.prefix_dtype),
+            prefix_length=payload.prefix_length,
+            batch_size=payload.batch_size,
+            dtype=payload.prefix_dtype,
+            device=payload.prefix_device,
+        )
+        prefix_context = PolicyPrefixContext(
+            model_prefix_context=model_prefix_context,
+            state=restore(payload.state),
+        )
+        return SuffixRolloutRequest(
+            prefix_context=prefix_context,
+            noise=restore(payload.noise),
+        )
+
+    def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
+        payload = self.serialize(request)
+        restored_request = self.deserialize(payload)
+        return self.local_backend.run(policy, restored_request)
 
 
 class PI05PrefixEmbedder(nn.Module):
@@ -1455,6 +1535,8 @@ class PI05Policy(PreTrainedPolicy):
             return self._local_suffix_backend
         if backend_name == "dummy_local":
             return DummyPI05SuffixBackend(self._local_suffix_backend)
+        if backend_name == "serialized_local":
+            return SerializedPI05SuffixBackend(self._local_suffix_backend)
         raise ValueError(f"Unsupported suffix backend: {backend_name}")
 
     def get_suffix_backend_name(self) -> str:
