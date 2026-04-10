@@ -33,6 +33,8 @@ import builtins
 import math
 import os
 import pickle
+import queue
+import threading
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,6 +145,20 @@ class DispatchedSuffixEnvelope:
     """Bytes-oriented suffix payload envelope for dispatched prototype backends."""
 
     payload_bytes: bytes
+
+
+@dataclass
+class QueuedSuffixRequest:
+    """Queued request envelope for prototype suffix workers."""
+
+    payload: DispatchedSuffixEnvelope
+
+
+@dataclass
+class QueuedSuffixResponse:
+    """Queued response envelope for prototype suffix workers."""
+
+    payload: DispatchedSuffixEnvelope
 
 
 class PI05SuffixBackend:
@@ -372,6 +388,55 @@ class DispatchedNumpyPI05SuffixBackend(PI05SuffixBackend):
         self.local_backend = local_backend
         self.numpy_backend = NumpySerializedPI05SuffixBackend(local_backend)
         self.dispatcher = PickleNumpySuffixDispatcher()
+
+    def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
+        payload = self.numpy_backend.serialize(request)
+        envelope = self.dispatcher.dispatch(payload)
+        restored_payload = self.dispatcher.receive(envelope)
+        restored_request = self.numpy_backend.deserialize(restored_payload)
+        return self.local_backend.run(policy, restored_request)
+
+
+class QueuedPickleNumpySuffixDispatcher(PI05SuffixDispatcher):
+    """Prototype dispatcher with a worker thread and explicit request/response queues."""
+
+    name = "queued_pickle_numpy_dispatcher"
+
+    def __init__(self):
+        self.request_queue: queue.Queue[QueuedSuffixRequest | None] = queue.Queue()
+        self.response_queue: queue.Queue[QueuedSuffixResponse] = queue.Queue()
+        self._worker = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker.start()
+
+    def _worker_loop(self) -> None:
+        while True:
+            item = self.request_queue.get()
+            if item is None:
+                return
+            self.response_queue.put(QueuedSuffixResponse(payload=item.payload))
+
+    def dispatch(self, payload: NumpySerializedSuffixPayload) -> DispatchedSuffixEnvelope:
+        envelope = DispatchedSuffixEnvelope(payload_bytes=pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
+        self.request_queue.put(QueuedSuffixRequest(payload=envelope))
+        response = self.response_queue.get()
+        return response.payload
+
+    def receive(self, envelope: DispatchedSuffixEnvelope) -> NumpySerializedSuffixPayload:
+        payload = pickle.loads(envelope.payload_bytes)
+        if not isinstance(payload, NumpySerializedSuffixPayload):
+            raise TypeError(f"Unexpected dispatched payload type: {type(payload)!r}")
+        return payload
+
+
+class QueuedDispatchedNumpyPI05SuffixBackend(PI05SuffixBackend):
+    """Prototype backend that simulates a queued request/response suffix service."""
+
+    name = "queued_dispatched_numpy_local"
+
+    def __init__(self, local_backend: LocalPI05SuffixBackend):
+        self.local_backend = local_backend
+        self.numpy_backend = NumpySerializedPI05SuffixBackend(local_backend)
+        self.dispatcher = QueuedPickleNumpySuffixDispatcher()
 
     def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
         payload = self.numpy_backend.serialize(request)
@@ -1689,6 +1754,8 @@ class PI05Policy(PreTrainedPolicy):
             return NumpySerializedPI05SuffixBackend(self._local_suffix_backend)
         if backend_name == "dispatched_numpy_local":
             return DispatchedNumpyPI05SuffixBackend(self._local_suffix_backend)
+        if backend_name == "queued_dispatched_numpy_local":
+            return QueuedDispatchedNumpyPI05SuffixBackend(self._local_suffix_backend)
         raise ValueError(f"Unsupported suffix backend: {backend_name}")
 
     def get_suffix_backend_name(self) -> str:

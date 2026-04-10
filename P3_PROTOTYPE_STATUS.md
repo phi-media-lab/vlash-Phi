@@ -45,13 +45,14 @@ Key interpretation:
 
 ## Prototype Backend Layers
 
-The current prototype supports five suffix backend modes:
+The current prototype supports six suffix backend modes:
 
 - `local`
 - `dummy_local`
 - `serialized_local`
 - `numpy_local`
 - `dispatched_numpy_local`
+- `queued_dispatched_numpy_local`
 
 ### `local`
 
@@ -142,6 +143,23 @@ Validated:
 - backend name switches correctly
 - comparison result remains exact (`max_abs_diff = 0.0`)
 
+### `queued_dispatched_numpy_local`
+
+This backend pushes the dispatched prototype one step further by routing the
+bytes envelope through an explicit request/response queue and worker thread.
+
+Purpose:
+
+- simulate a lightweight suffix service boundary instead of a direct method hop
+- validate that the current payload contract survives queued dispatch semantics
+- keep correctness checks inside the same runtime/reporting path used by the other backends
+
+Validated:
+
+- config override works
+- backend name switches correctly
+- comparison result remains exact (`max_abs_diff = 0.0`)
+
 ## Runtime Validation Mode
 
 The prototype no longer depends only on offline checks.
@@ -159,6 +177,7 @@ Current runtime support:
   - [libero_rocm_p3_proto.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto.yaml)
   - [libero_rocm_p3_proto_numpy.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_numpy.yaml)
   - [libero_rocm_p3_proto_dispatched.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_dispatched.yaml)
+  - [libero_rocm_p3_proto_queued.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_queued.yaml)
 
 This means `vlash run` can now validate prototype backend correctness during staged inference launches.
 
@@ -201,6 +220,14 @@ LIBERO_CONFIG_PATH=/home/amd/.libero \
 tools/run_rocm_vlash.sh run examples/inference/libero_rocm_p3_proto_dispatched.yaml
 ```
 
+Queued-dispatch runtime entry point:
+
+```bash
+VENV_DIR=/home/amd/.venvs/vlash-rocm \
+LIBERO_CONFIG_PATH=/home/amd/.libero \
+tools/run_rocm_vlash.sh run examples/inference/libero_rocm_p3_proto_queued.yaml
+```
+
 Prototype backend sweep entry point:
 
 ```bash
@@ -234,6 +261,7 @@ The current prototype has proved:
 - an explicit serialized payload path can preserve correctness in simulator-backed runtime
 - a stricter `numpy` payload path can also preserve correctness
 - a dispatched bytes-envelope path can also preserve correctness
+- a queued request/response dispatch path can also preserve correctness
 - multiple prototype backends can now be swept under one simulator config and compared with a shared summary format
 - the current backend ladder still shows negligible runtime spread under the same simulator config, which supports using correctness-preserving contract strictness as the main prototype axis for now
 
