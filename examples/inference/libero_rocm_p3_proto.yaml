@@ -1,0 +1,40 @@
+# VLASH P3-prototype configuration for a local LIBERO simulator on AMD ROCm
+
+robot:
+  type: libero_robot
+  id: libero_spatial_task0
+  task_suite_name: libero_spatial
+  task_id: 0
+  episode_index: 0
+  num_steps_wait: 10
+  seed: 0
+  cameras:
+    image:
+      type: libero_camera
+      width: 256
+      height: 256
+      fps: 30
+    wrist_image:
+      type: libero_camera
+      width: 256
+      height: 256
+      fps: 30
+
+policy:
+  path: /home/amd/.cache/vlash/models/vlash-pi05-libero-async5
+  n_action_steps: 8
+  compile_model: true
+  device: cuda
+  fuse_qkv: false
+  fuse_gate_up: false
+  suffix_backend: serialized_local
+
+single_task: "complete the libero spatial task in simulation"
+
+fps: 5
+control_time_s: 2
+display_data: false
+play_sounds: false
+action_quant_ratio: 2
+inference_overlap_steps: 1
+suffix_backend_check: true

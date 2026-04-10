@@ -132,6 +132,8 @@ Current runtime support:
   - backend name
   - latest `max_abs_diff`
   - latest `mean_abs_diff`
+- ready-to-run prototype config:
+  - [libero_rocm_p3_proto.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto.yaml)
 
 This means `vlash run` can now validate prototype backend correctness during staged inference launches.
 
@@ -149,6 +151,14 @@ This has now been validated in two ways:
 
 - offline prototype comparison via [check_suffix_backend.py](/home/amd/vlash/tools/check_suffix_backend.py)
 - runtime-integrated validation via `suffix_backend_check=true`
+
+Minimal runtime entry point:
+
+```bash
+VENV_DIR=/home/amd/.venvs/vlash-rocm \
+LIBERO_CONFIG_PATH=/home/amd/.libero \
+tools/run_rocm_vlash.sh run examples/inference/libero_rocm_p3_proto.yaml
+```
 
 ## What The Prototype Has Proved
 
