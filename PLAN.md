@@ -90,6 +90,8 @@ Current best simulator-backed evidence:
 - the first `LIBERO` sweep shows `q2/o1` is the current best simulator-backed candidate
 - the first `LIBERO` sweep also confirms overlap benefit is not monotonic in simulator runtime
 - the longer confirmation sweep keeps `q2/o1` ahead of `q2/o2`
+- a prototype latency-budget reference now exists for suffix-only dispatch cost:
+  [P3_LATENCY_BUDGET.md](/home/amd/vlash/P3_LATENCY_BUDGET.md)
 
 ## Phase Overview
 

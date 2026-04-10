@@ -187,6 +187,7 @@ Current runtime support:
 - `suffix_backend_check=true` in [run_config.py](/home/amd/vlash/vlash/configs/run_config.py)
 - offline comparison helper: [check_suffix_backend.py](/home/amd/vlash/tools/check_suffix_backend.py)
 - multi-backend sweep helper: [sweep_suffix_backends.py](/home/amd/vlash/tools/sweep_suffix_backends.py)
+- latency-budget reference: [P3_LATENCY_BUDGET.md](/home/amd/vlash/P3_LATENCY_BUDGET.md)
 - runtime stats now include:
   - backend name
   - latest `max_abs_diff`
