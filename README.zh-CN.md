@@ -49,6 +49,7 @@ English version: [README.md](README.md)
 ## 关键文件
 
 - 状态总览：[ROCM_VLASH_STATUS.md](ROCM_VLASH_STATUS.md)
+- 实施计划：[PLAN.md](PLAN.md)
 - ROCm 环境脚本：[tools/setup_rocm_env.sh](tools/setup_rocm_env.sh)
 - ROCm 运行时检查：[tools/check_rocm_runtime.sh](tools/check_rocm_runtime.sh)
 - ROCm 启动入口：[tools/run_rocm_vlash.sh](tools/run_rocm_vlash.sh)

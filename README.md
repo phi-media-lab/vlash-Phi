@@ -49,6 +49,7 @@ This branch was validated on:
 ## Key Files
 
 - Status summary: [ROCM_VLASH_STATUS.md](ROCM_VLASH_STATUS.md)
+- Implementation plan: [PLAN.md](PLAN.md)
 - ROCm env bootstrap: [tools/setup_rocm_env.sh](tools/setup_rocm_env.sh)
 - ROCm runtime check: [tools/check_rocm_runtime.sh](tools/check_rocm_runtime.sh)
 - ROCm launcher: [tools/run_rocm_vlash.sh](tools/run_rocm_vlash.sh)
