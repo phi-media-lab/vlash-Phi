@@ -365,25 +365,51 @@ class VLASHAsyncManager:
         current_state = observation.get("observation.state")
         remaining_actions = self.current_chunk_slot.actions_cpu[self.chunk_index :]
         if remaining_actions.size == 0:
-            return self.current_chunk_slot.actions_cpu[-1].copy(), "last_action"
+            return self.project_action_to_state(
+                self.current_chunk_slot.actions_cpu[-1],
+                current_state,
+            ), "last_action"
 
         if current_state is None:
             return remaining_actions[-1].copy(), "last_action"
 
         current_state = np.asarray(current_state)
         if current_state.ndim == 0:
-            return remaining_actions[-1].copy(), "last_action"
+            return self.project_action_to_state(remaining_actions[-1], current_state), "last_action"
 
         state_dim = current_state.shape[-1]
         action_dim = remaining_actions.shape[-1]
         if state_dim != action_dim:
-            return remaining_actions[-1].copy(), "last_action"
+            return self.project_action_to_state(remaining_actions[-1], current_state), "last_action_projected"
 
         start_action = remaining_actions[0]
         end_action = remaining_actions[-1]
         predicted_state = current_state.copy()
         predicted_state[...] = current_state + (end_action - start_action)
         return predicted_state, "delta_rollforward"
+
+    def project_action_to_state(
+        self,
+        action: np.ndarray,
+        current_state: np.ndarray | None,
+    ) -> np.ndarray:
+        """Project an action vector into the policy state shape.
+
+        This is a conservative fallback for mixed state/action dimensions:
+        preserve the current state shape when available, then overwrite the
+        leading coordinates with the action surrogate.
+        """
+        action = np.asarray(action, dtype=np.float32)
+        if current_state is None:
+            return action.copy()
+
+        projected = np.asarray(current_state, dtype=np.float32).copy()
+        if projected.ndim == 0:
+            return action.copy()
+
+        overlap_dim = min(projected.shape[-1], action.shape[-1])
+        projected[..., :overlap_dim] = action[..., :overlap_dim]
+        return projected
 
     def log_inference_artifacts(self, stage: str, inference_artifacts: InferenceArtifacts) -> None:
         """Emit debug logging for staged runtime launches."""
