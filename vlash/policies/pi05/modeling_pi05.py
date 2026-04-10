@@ -32,6 +32,7 @@ Architecture:
 import builtins
 import math
 import os
+import pickle
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -135,6 +136,13 @@ class NumpySerializedSuffixPayload:
     state_dtype: str
     noise: np.ndarray | None = None
     noise_dtype: str | None = None
+
+
+@dataclass
+class DispatchedSuffixEnvelope:
+    """Bytes-oriented suffix payload envelope for dispatched prototype backends."""
+
+    payload_bytes: bytes
 
 
 class PI05SuffixBackend:
@@ -325,6 +333,51 @@ class NumpySerializedPI05SuffixBackend(PI05SuffixBackend):
     def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
         payload = self.serialize(request)
         restored_request = self.deserialize(payload)
+        return self.local_backend.run(policy, restored_request)
+
+
+class PI05SuffixDispatcher:
+    """Abstract dispatcher used to simulate a standalone suffix backend hop."""
+
+    name = "abstract_dispatcher"
+
+    def dispatch(self, payload: NumpySerializedSuffixPayload) -> DispatchedSuffixEnvelope:
+        raise NotImplementedError
+
+    def receive(self, envelope: DispatchedSuffixEnvelope) -> NumpySerializedSuffixPayload:
+        raise NotImplementedError
+
+
+class PickleNumpySuffixDispatcher(PI05SuffixDispatcher):
+    """Prototype dispatcher that forces a bytes envelope around numpy payloads."""
+
+    name = "pickle_numpy_dispatcher"
+
+    def dispatch(self, payload: NumpySerializedSuffixPayload) -> DispatchedSuffixEnvelope:
+        return DispatchedSuffixEnvelope(payload_bytes=pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
+
+    def receive(self, envelope: DispatchedSuffixEnvelope) -> NumpySerializedSuffixPayload:
+        payload = pickle.loads(envelope.payload_bytes)
+        if not isinstance(payload, NumpySerializedSuffixPayload):
+            raise TypeError(f"Unexpected dispatched payload type: {type(payload)!r}")
+        return payload
+
+
+class DispatchedNumpyPI05SuffixBackend(PI05SuffixBackend):
+    """Prototype backend that validates a dispatched bytes-oriented boundary."""
+
+    name = "dispatched_numpy_local"
+
+    def __init__(self, local_backend: LocalPI05SuffixBackend):
+        self.local_backend = local_backend
+        self.numpy_backend = NumpySerializedPI05SuffixBackend(local_backend)
+        self.dispatcher = PickleNumpySuffixDispatcher()
+
+    def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
+        payload = self.numpy_backend.serialize(request)
+        envelope = self.dispatcher.dispatch(payload)
+        restored_payload = self.dispatcher.receive(envelope)
+        restored_request = self.numpy_backend.deserialize(restored_payload)
         return self.local_backend.run(policy, restored_request)
 
 
@@ -1634,6 +1687,8 @@ class PI05Policy(PreTrainedPolicy):
             return SerializedPI05SuffixBackend(self._local_suffix_backend)
         if backend_name == "numpy_local":
             return NumpySerializedPI05SuffixBackend(self._local_suffix_backend)
+        if backend_name == "dispatched_numpy_local":
+            return DispatchedNumpyPI05SuffixBackend(self._local_suffix_backend)
         raise ValueError(f"Unsupported suffix backend: {backend_name}")
 
     def get_suffix_backend_name(self) -> str:

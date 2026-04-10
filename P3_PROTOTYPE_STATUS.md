@@ -45,12 +45,13 @@ Key interpretation:
 
 ## Prototype Backend Layers
 
-The current prototype supports four suffix backend modes:
+The current prototype supports five suffix backend modes:
 
 - `local`
 - `dummy_local`
 - `serialized_local`
 - `numpy_local`
+- `dispatched_numpy_local`
 
 ### `local`
 
@@ -121,6 +122,26 @@ Validated:
 - backend name switches correctly
 - comparison result is exact (`max_abs_diff = 0.0`)
 
+### `dispatched_numpy_local`
+
+The newest prototype backend adds an explicit dispatch hop on top of `numpy_local`.
+
+Purpose:
+
+- serialize the suffix request into the existing numpy payload contract
+- wrap that payload into a bytes envelope
+- force an explicit dispatch/receive boundary before reconstruction
+- validate that the current suffix contract survives a more standalone execution shape
+
+This is still local in where compute happens, but it is less local in how the
+request is transported and restored.
+
+Validated:
+
+- config override works
+- backend name switches correctly
+- comparison result remains exact (`max_abs_diff = 0.0`)
+
 ## Runtime Validation Mode
 
 The prototype no longer depends only on offline checks.
@@ -135,6 +156,7 @@ Current runtime support:
 - ready-to-run prototype config:
   - [libero_rocm_p3_proto.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto.yaml)
   - [libero_rocm_p3_proto_numpy.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_numpy.yaml)
+  - [libero_rocm_p3_proto_dispatched.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_dispatched.yaml)
 
 This means `vlash run` can now validate prototype backend correctness during staged inference launches.
 
@@ -169,6 +191,14 @@ LIBERO_CONFIG_PATH=/home/amd/.libero \
 tools/run_rocm_vlash.sh run examples/inference/libero_rocm_p3_proto_numpy.yaml
 ```
 
+Dispatched-bytes runtime entry point:
+
+```bash
+VENV_DIR=/home/amd/.venvs/vlash-rocm \
+LIBERO_CONFIG_PATH=/home/amd/.libero \
+tools/run_rocm_vlash.sh run examples/inference/libero_rocm_p3_proto_dispatched.yaml
+```
+
 ## What The Prototype Has Proved
 
 The current prototype has proved:
@@ -179,6 +209,7 @@ The current prototype has proved:
 - runtime can surface backend correctness in structured stats
 - an explicit serialized payload path can preserve correctness in simulator-backed runtime
 - a stricter `numpy` payload path can also preserve correctness
+- a dispatched bytes-envelope path can also preserve correctness
 
 ## What The Prototype Has Not Proved
 
@@ -204,7 +235,7 @@ It is not yet strong enough to justify:
 The next sensible step is to either:
 
 1. document this prototype state as the current branch checkpoint, or
-2. build one more backend variant that exercises a stricter contract than `numpy_local`
+2. build one more backend variant that exercises a stricter contract than `dispatched_numpy_local`
 
 The first option is lower risk.
 The second option is higher value if the branch wants to continue deeper into prototype backend design.
