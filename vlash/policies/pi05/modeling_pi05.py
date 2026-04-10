@@ -33,6 +33,7 @@ import builtins
 import math
 import os
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
@@ -59,6 +60,31 @@ from vlash.policies.pi05.utils import (
 from vlash.layers.attention import Attention
 from vlash.layers.linear import QKVLinear, MergedColumnLinear
 from vlash.layers.rope import RotaryEmbedding
+
+
+@dataclass
+class PrefixContext:
+    """Explicit runtime container for prefix prefill state.
+
+    The current implementation still relies on layer-local KV cache for execution,
+    but this object makes the prefix phase observable to the runtime and gives us
+    a stable handoff shape for later refactors.
+    """
+
+    prefix_pad_masks: torch.Tensor
+    prefix_att_masks: torch.Tensor
+    prefix_length: int
+    batch_size: int
+    dtype: torch.dtype
+    device: torch.device
+
+
+@dataclass
+class PolicyPrefixContext:
+    """Policy-level runtime state for staged inference."""
+
+    model_prefix_context: PrefixContext
+    state: torch.Tensor
 
 
 class PI05PrefixEmbedder(nn.Module):
@@ -751,6 +777,91 @@ class PI05Model(nn.Module):
         time = time_beta * 0.999 + 0.001
         return time
 
+    def reset_prefix_cache(self) -> None:
+        """Clear all layer-local prefix KV caches."""
+        for layer in self.layers:
+            layer.self_attn.attn.reset_cache()
+
+    @torch.no_grad()
+    def build_prefix_context(
+        self,
+        images,
+        img_masks,
+        tokens,
+        masks,
+    ) -> PrefixContext:
+        """Run the prefix prefill path and materialize its runtime metadata."""
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.prefix_embedder(
+            images, img_masks, tokens, masks
+        )
+
+        self.reset_prefix_cache()
+
+        prefix_attention_mask, prefix_position_ids = build_attention_mask_and_position_ids(
+            prefix_pad_masks,
+            prefix_att_masks,
+            prefix_embs.dtype,
+        )
+
+        hidden_states_prefill = [prefix_embs, None]
+        conds_prefill = [None, None]
+
+        for layer in self.layers:
+            hidden_states_prefill = layer(
+                hidden_states_prefill,
+                prefix_attention_mask,
+                prefix_position_ids,
+                conds_prefill,
+                use_cache=True,
+            )
+
+        return PrefixContext(
+            prefix_pad_masks=prefix_pad_masks,
+            prefix_att_masks=prefix_att_masks,
+            prefix_length=prefix_embs.shape[1],
+            batch_size=prefix_embs.shape[0],
+            dtype=prefix_embs.dtype,
+            device=prefix_embs.device,
+        )
+
+    @torch.no_grad()
+    def rollout_suffix(
+        self,
+        prefix_context: PrefixContext,
+        state: torch.Tensor,
+        noise: torch.Tensor | None = None,
+        num_steps: int | None = None,
+    ) -> torch.Tensor:
+        """Run suffix rollout using an already-prefilled prefix context."""
+        if num_steps is None:
+            num_steps = self.config.num_inference_steps
+
+        if noise is None:
+            actions_shape = (
+                prefix_context.batch_size,
+                self.config.chunk_size,
+                self.config.max_action_dim,
+            )
+            noise = self.sample_noise(actions_shape, prefix_context.device)
+
+        dt = torch.tensor(-1.0 / num_steps, dtype=torch.float32, device=prefix_context.device)
+
+        x_t = noise
+        time = torch.tensor(1.0, dtype=torch.float32, device=prefix_context.device)
+        for _ in range(num_steps):
+            expanded_time = time.expand(prefix_context.batch_size)
+            v_t = self.denoise_step(
+                prefix_context.prefix_pad_masks,
+                prefix_context.prefix_att_masks,
+                state,
+                x_t,
+                expanded_time,
+            )
+            x_t = x_t + dt * v_t
+            time = time + dt
+
+        return x_t
+
     def forward(self, images, img_masks, tokens, masks, state, actions, noise=None, time=None):
         """Training forward pass: compute flow matching loss.
         
@@ -1040,67 +1151,8 @@ class PI05Model(nn.Module):
         Returns:
             Sampled actions [B, chunk_size, action_dim].
         """
-        if num_steps is None:
-            num_steps = self.config.num_inference_steps
-
-        bsz = tokens.shape[0]
-        device = tokens.device
-
-        # Initialize from noise
-        if noise is None:
-            actions_shape = (
-                bsz,
-                self.config.chunk_size,
-                self.config.max_action_dim,
-            )
-            noise = self.sample_noise(actions_shape, device)
-
-        # Prefill: compute and cache prefix KV
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.prefix_embedder(
-            images, img_masks, tokens, masks
-        )
-        
-        # Reset KV cache
-        for layer in self.layers:
-            layer.self_attn.attn.reset_cache()
-
-        prefix_attention_mask, prefix_position_ids = build_attention_mask_and_position_ids(
-            prefix_pad_masks,
-            prefix_att_masks,
-            prefix_embs.dtype,
-        )
-
-        # Prefill forward pass (caches KV)
-        hidden_states_prefill = [prefix_embs, None]
-        conds_prefill = [None, None]
-
-        for layer in self.layers:
-            hidden_states_prefill = layer(
-                hidden_states_prefill,
-                prefix_attention_mask,
-                prefix_position_ids,
-                conds_prefill,
-                use_cache=True,
-            )
-
-        dt = -1.0 / num_steps
-        dt = torch.tensor(dt, dtype=torch.float32, device=device)
-
-        x_t = noise
-        time = torch.tensor(1.0, dtype=torch.float32, device=device)
-        for _ in range(num_steps):
-            expanded_time = time.expand(bsz)
-            v_t = self.denoise_step(
-                prefix_pad_masks,
-                prefix_att_masks,
-                state,
-                x_t,
-                expanded_time,
-            )
-            x_t = x_t + dt * v_t
-            time = time + dt
-
-        return x_t
+        prefix_context = self.build_prefix_context(images, img_masks, tokens, masks)
+        return self.rollout_suffix(prefix_context, state, noise=noise, num_steps=num_steps)
 
 
 class PI05Policy(PreTrainedPolicy):
@@ -1299,15 +1351,37 @@ class PI05Policy(PreTrainedPolicy):
         Returns:
             Action chunk [B, n_action_steps, action_dim].
         """
+        prefix_context = self.build_prefix_context(batch)
+        return self.rollout_action_chunk(prefix_context, noise=noise)
+
+    @torch.no_grad()
+    def build_prefix_context(self, batch: dict[str, Tensor]) -> PolicyPrefixContext:
+        """Build policy-level prefix runtime state without changing inference semantics."""
         batch = self.normalize_inputs(batch)
 
         images, img_masks = self.prepare_images(batch)
         state = self.prepare_state(batch)
-
         lang_tokens, lang_masks = self.prepare_language(batch, pad_to_max_length=False)
+        model_prefix_context = self.model.build_prefix_context(
+            images, img_masks, lang_tokens, lang_masks
+        )
 
-        actions = self.model.sample_actions(
-            images, img_masks, lang_tokens, lang_masks, state, noise=noise
+        return PolicyPrefixContext(
+            model_prefix_context=model_prefix_context,
+            state=state,
+        )
+
+    @torch.no_grad()
+    def rollout_action_chunk(
+        self,
+        prefix_context: PolicyPrefixContext,
+        noise: Tensor | None = None,
+    ) -> Tensor:
+        """Roll out an action chunk from an existing prefix context."""
+        actions = self.model.rollout_suffix(
+            prefix_context.model_prefix_context,
+            prefix_context.state,
+            noise=noise,
         )
 
         # Trim to original action dimension

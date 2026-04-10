@@ -33,6 +33,7 @@ from lerobot.robots.lekiwi import LeKiwiClientConfig, LeKiwiConfig  # noqa: F401
 from lerobot.robots.reachy2 import Reachy2RobotConfig  # noqa: F401
 from lerobot.robots.so100_follower import SO100FollowerConfig  # noqa: F401
 from lerobot.robots.so101_follower import SO101FollowerConfig  # noqa: F401
+from vlash.mock_robot import MockRobotConfig  # noqa: F401
 
 
 @dataclass

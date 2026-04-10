@@ -30,7 +30,7 @@ Usage:
 
 import logging
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pprint import pformat
 from copy import copy
 import numpy as np
@@ -51,8 +51,64 @@ from lerobot.utils.utils import get_safe_torch_device, init_logging, log_say
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 
 from vlash.configs import RunConfig
+from vlash.mock_robot import MockRobot, MockRobotConfig
 from vlash.policies.factory import get_policy_class
+from vlash.runtime_stats import stage_timings_to_dict, summarize_stage_timings
 from vlash.utils import prepare_observation_for_inference
+
+
+@dataclass
+class ObservationSlot:
+    """Runtime container for the latest captured observation frame."""
+
+    frame: dict | None = None
+    captured_at: float = 0.0
+
+
+@dataclass
+class ChunkSlot:
+    """Runtime container for action chunks handed between inference and execution."""
+
+    actions_cpu: np.ndarray | None = None
+    actions_gpu: torch.Tensor | None = None
+    produced_at: float = 0.0
+
+
+@dataclass
+class InferenceTimings:
+    """Per-phase timings for one inference launch."""
+
+    observation_prepare_s: float = 0.0
+    prefix_build_s: float = 0.0
+    suffix_rollout_s: float = 0.0
+    total_s: float = 0.0
+
+
+@dataclass
+class InferenceArtifacts:
+    """Runtime container for staged inference state."""
+
+    prefix_context: object | None = None
+    timings: InferenceTimings | None = None
+    future_state_mode: str = "none"
+
+
+@dataclass
+class RuntimeStats:
+    """Aggregate runtime profiling across the control loop."""
+
+    observation_fetches: int = 0
+    observation_fetch_s: float = 0.0
+    inference_launches: int = 0
+    chunk_switches: int = 0
+    chunk_handoff_s: float = 0.0
+    loop_iterations: int = 0
+    loop_s: float = 0.0
+    last_future_state_mode: str = "none"
+    observation_prepare_s: float = 0.0
+    prefix_build_s: float = 0.0
+    suffix_rollout_s: float = 0.0
+    inference_total_s: float = 0.0
 
 
 def normalize_image_feature_name(name: str) -> str:
@@ -136,8 +192,11 @@ class VLASHAsyncManager:
         self.image_feature_map = image_feature_map or {}
         
         # Chunk state management
-        self.current_chunk: np.ndarray | None = None  # Currently executing (on CPU)
-        self.next_chunk: torch.Tensor | None = None   # Pre-computed (on GPU)
+        self.current_chunk_slot = ChunkSlot()  # Currently executing chunk on CPU
+        self.next_chunk_slot = ChunkSlot()     # Pre-computed chunk on GPU
+        self.current_inference_artifacts = InferenceArtifacts()
+        self.next_inference_artifacts = InferenceArtifacts()
+        self.runtime_stats = RuntimeStats()
         self.chunk_index = 0  # Position within current chunk
         
         self.device = get_safe_torch_device(policy.config.device)
@@ -154,7 +213,7 @@ class VLASHAsyncManager:
         Returns:
             True if there's a current or pending chunk, False otherwise.
         """
-        return (self.current_chunk is not None) or (self.next_chunk is not None)
+        return (self.current_chunk_slot.actions_cpu is not None) or (self.next_chunk_slot.actions_gpu is not None)
 
     def should_switch_chunk(self) -> bool:
         """Check if it's time to switch to the next chunk.
@@ -196,11 +255,11 @@ class VLASHAsyncManager:
         Raises:
             RuntimeError: If no chunk is currently executing.
         """
-        if self.current_chunk is None:
+        if self.current_chunk_slot.actions_cpu is None:
             raise RuntimeError("No chunk is currently executing")
 
         # Get action values at current index and map to feature names
-        action_values = self.current_chunk[self.chunk_index]
+        action_values = self.current_chunk_slot.actions_cpu[self.chunk_index]
         action = {key: action_values[i].item() for i, key in enumerate(self.robot.action_features)}
         return action
 
@@ -217,13 +276,7 @@ class VLASHAsyncManager:
         Returns:
             Predicted action chunk as a torch tensor [n_action_steps, action_dim].
         """
-        observation = copy(observation)
-        observation = apply_policy_image_mapping(observation, self.image_feature_map)
-        
-        # Future state awareness: use future state instead of current state
-        last_action = self.current_chunk[self.n_action_steps - 1] if self.current_chunk is not None else None
-        if last_action is not None:
-            observation["observation.state"] = last_action
+        observation, _ = self.prepare_inference_observation(observation)
 
         with torch.inference_mode():
             # Prepare observation: convert images to CHW format, normalize, add batch dim
@@ -240,6 +293,128 @@ class VLASHAsyncManager:
         # Remove batch dimension
         return action_chunk.squeeze(0)
 
+    def launch_next_inference_staged(
+        self,
+        observation: dict[str, np.ndarray],
+    ) -> tuple[torch.Tensor, InferenceArtifacts]:
+        """Run staged inference when the policy exposes explicit runtime phases."""
+        total_start = time.perf_counter()
+        observation, future_state_mode = self.prepare_inference_observation(observation)
+
+        with torch.inference_mode():
+            prepare_start = time.perf_counter()
+            observation = prepare_observation_for_inference(
+                observation,
+                self.device,
+                self.single_task,
+                self.robot.robot_type,
+            )
+            prepare_time = time.perf_counter() - prepare_start
+
+            prefix_start = time.perf_counter()
+            prefix_context = self.policy.build_prefix_context(observation)
+            prefix_time = time.perf_counter() - prefix_start
+
+            suffix_start = time.perf_counter()
+            action_chunk = self.policy.rollout_action_chunk(prefix_context)
+            suffix_time = time.perf_counter() - suffix_start
+
+        timings = InferenceTimings(
+            observation_prepare_s=prepare_time,
+            prefix_build_s=prefix_time,
+            suffix_rollout_s=suffix_time,
+            total_s=time.perf_counter() - total_start,
+        )
+
+        return action_chunk.squeeze(0), InferenceArtifacts(
+            prefix_context=prefix_context,
+            timings=timings,
+            future_state_mode=future_state_mode,
+        )
+
+    def prepare_inference_observation(
+        self,
+        observation: dict[str, np.ndarray],
+    ) -> tuple[dict[str, np.ndarray], str]:
+        """Apply image remapping and future-state substitution before inference."""
+        prepared = copy(observation)
+        prepared = apply_policy_image_mapping(prepared, self.image_feature_map)
+
+        future_state, future_state_mode = self.rollforward_state(prepared)
+        if future_state is not None:
+            prepared["observation.state"] = future_state
+
+        return prepared, future_state_mode
+
+    def rollforward_state(
+        self,
+        observation: dict[str, np.ndarray],
+    ) -> tuple[np.ndarray | None, str]:
+        """Approximate the state at the end of the current chunk.
+
+        First pass implementation:
+        - if no chunk is active, keep the live observation
+        - if state and action dimensions match, extrapolate from the remaining chunk
+        - otherwise, fall back to the previous last-action surrogate
+        """
+        if self.current_chunk_slot.actions_cpu is None:
+            return None, "none"
+
+        current_state = observation.get("observation.state")
+        remaining_actions = self.current_chunk_slot.actions_cpu[self.chunk_index :]
+        if remaining_actions.size == 0:
+            return self.current_chunk_slot.actions_cpu[-1].copy(), "last_action"
+
+        if current_state is None:
+            return remaining_actions[-1].copy(), "last_action"
+
+        current_state = np.asarray(current_state)
+        if current_state.ndim == 0:
+            return remaining_actions[-1].copy(), "last_action"
+
+        state_dim = current_state.shape[-1]
+        action_dim = remaining_actions.shape[-1]
+        if state_dim != action_dim:
+            return remaining_actions[-1].copy(), "last_action"
+
+        start_action = remaining_actions[0]
+        end_action = remaining_actions[-1]
+        predicted_state = current_state.copy()
+        predicted_state[...] = current_state + (end_action - start_action)
+        return predicted_state, "delta_rollforward"
+
+    def log_inference_artifacts(self, stage: str, inference_artifacts: InferenceArtifacts) -> None:
+        """Emit debug logging for staged runtime launches."""
+        if not logging.getLogger().isEnabledFor(logging.DEBUG):
+            return
+
+        payload = {
+            "stage": stage,
+            "future_state_mode": inference_artifacts.future_state_mode,
+        }
+        if inference_artifacts.timings is not None:
+            payload["timings_ms"] = {
+                key: round(value * 1000, 2)
+                for key, value in asdict(inference_artifacts.timings).items()
+            }
+        logging.debug("Staged inference artifacts: %s", payload)
+
+    def record_inference_artifacts(self, inference_artifacts: InferenceArtifacts) -> None:
+        """Accumulate staged inference timings into runtime stats."""
+        self.runtime_stats.inference_launches += 1
+        self.runtime_stats.last_future_state_mode = inference_artifacts.future_state_mode
+        if inference_artifacts.timings is None:
+            return
+
+        self.runtime_stats.observation_prepare_s += inference_artifacts.timings.observation_prepare_s
+        self.runtime_stats.prefix_build_s += inference_artifacts.timings.prefix_build_s
+        self.runtime_stats.suffix_rollout_s += inference_artifacts.timings.suffix_rollout_s
+        self.runtime_stats.inference_total_s += inference_artifacts.timings.total_s
+
+    def get_runtime_stats(self) -> RuntimeStats:
+        """Return a shallow copy of aggregate runtime stats."""
+        return RuntimeStats(**asdict(self.runtime_stats))
+
     def get_action(self, observation_frame: dict) -> dict[str, float]:
         """Get the next action to execute.
         
@@ -252,24 +427,67 @@ class VLASHAsyncManager:
         Returns:
             Action dictionary for the robot to execute.
         """
+        use_staged_runtime = all(
+            hasattr(self.policy, attr)
+            for attr in ("build_prefix_context", "rollout_action_chunk")
+        )
+
         # Bootstrap: compute first chunk synchronously
         if not self.is_running():
-            self.current_chunk = self.launch_next_inference(observation_frame).cpu().numpy()
+            if use_staged_runtime:
+                action_chunk, inference_artifacts = self.launch_next_inference_staged(observation_frame)
+                self.current_chunk_slot = ChunkSlot(
+                    actions_cpu=action_chunk.cpu().numpy(),
+                    produced_at=time.perf_counter(),
+                )
+                self.current_inference_artifacts = inference_artifacts
+                self.record_inference_artifacts(inference_artifacts)
+                self.log_inference_artifacts("bootstrap", inference_artifacts)
+            else:
+                self.current_chunk_slot = ChunkSlot(
+                    actions_cpu=self.launch_next_inference(observation_frame).cpu().numpy(),
+                    produced_at=time.perf_counter(),
+                )
         # Chunk transition: move pre-computed next chunk to current
         elif self.should_switch_chunk():
-            self.current_chunk = self.next_chunk.cpu().numpy() if self.next_chunk is not None else None
-            self.next_chunk = None
+            handoff_start = time.perf_counter()
+            self.current_chunk_slot = ChunkSlot(
+                actions_cpu=self.next_chunk_slot.actions_gpu.cpu().numpy()
+                if self.next_chunk_slot.actions_gpu is not None
+                else None,
+                produced_at=self.next_chunk_slot.produced_at,
+            )
+            self.runtime_stats.chunk_switches += 1
+            self.runtime_stats.chunk_handoff_s += time.perf_counter() - handoff_start
+            self.current_inference_artifacts = self.next_inference_artifacts
+            self.next_chunk_slot = ChunkSlot()
+            self.next_inference_artifacts = InferenceArtifacts()
 
         # Async inference: start computing next chunk in advance
         if self.should_launch_next_inference():
-            self.next_chunk = self.launch_next_inference(observation_frame)
+            if use_staged_runtime:
+                action_chunk, inference_artifacts = self.launch_next_inference_staged(observation_frame)
+                self.next_chunk_slot = ChunkSlot(
+                    actions_gpu=action_chunk,
+                    produced_at=time.perf_counter(),
+                )
+                self.next_inference_artifacts = inference_artifacts
+                self.record_inference_artifacts(inference_artifacts)
+                self.log_inference_artifacts("overlap", inference_artifacts)
+            else:
+                self.next_chunk_slot = ChunkSlot(
+                    actions_gpu=self.launch_next_inference(observation_frame),
+                    produced_at=time.perf_counter(),
+                )
 
         # Get action at current index
         action = self.get_current_action()
 
         # Advance index and handle chunk completion
         self.chunk_index = (self.chunk_index + 1) % self.n_action_steps
-        self.current_chunk = None if self.chunk_index == 0 else self.current_chunk
+        if self.chunk_index == 0:
+            self.current_chunk_slot = ChunkSlot()
+            self.current_inference_artifacts = InferenceArtifacts()
 
         return action
 
@@ -403,7 +621,7 @@ def run_loop(
     )
 
     step_count = 0
-    observation_frame = None
+    observation_slot = ObservationSlot()
     start_time = time.perf_counter()
 
     # Main control loop
@@ -417,13 +635,19 @@ def run_loop(
 
         # Fetch observation only when needed (reduces camera latency)
         if async_manager.should_fetch_observation():
+            observation_fetch_start = time.perf_counter()
             observation = robot.get_observation()
-            observation_frame = build_dataset_frame(dataset_features, observation, prefix="observation")
+            observation_slot = ObservationSlot(
+                frame=build_dataset_frame(dataset_features, observation, prefix="observation"),
+                captured_at=time.perf_counter(),
+            )
+            async_manager.runtime_stats.observation_fetches += 1
+            async_manager.runtime_stats.observation_fetch_s += time.perf_counter() - observation_fetch_start
         else:
             observation = None
 
         # Get action from async manager (handles chunk management internally)
-        action = async_manager.get_action(observation_frame)
+        action = async_manager.get_action(observation_slot.frame)
 
         # Send action based on quantization ratio
         if (step_count + 1) % action_quant_ratio == 0:
@@ -437,7 +661,45 @@ def run_loop(
             elapsed = time.perf_counter() - loop_start
             busy_wait(1 / fps - elapsed)
 
+        async_manager.runtime_stats.loop_iterations += 1
+        async_manager.runtime_stats.loop_s += time.perf_counter() - loop_start
         step_count += 1
+
+    runtime_stats = async_manager.get_runtime_stats()
+    payload = {
+        "loop_iterations": runtime_stats.loop_iterations,
+        "observation_fetches": runtime_stats.observation_fetches,
+        "inference_launches": runtime_stats.inference_launches,
+        "chunk_switches": runtime_stats.chunk_switches,
+        "last_future_state_mode": runtime_stats.last_future_state_mode,
+        "timings_ms": {
+            "loop_avg": round(
+                (runtime_stats.loop_s / runtime_stats.loop_iterations) * 1000, 2
+            )
+            if runtime_stats.loop_iterations
+            else 0.0,
+            "observation_fetch_avg": round(
+                (runtime_stats.observation_fetch_s / runtime_stats.observation_fetches) * 1000, 2
+            )
+            if runtime_stats.observation_fetches
+            else 0.0,
+            "chunk_handoff_avg": round(
+                (runtime_stats.chunk_handoff_s / runtime_stats.chunk_switches) * 1000, 2
+            )
+            if runtime_stats.chunk_switches
+            else 0.0,
+        },
+        "stage_timings_ms": stage_timings_to_dict(
+            summarize_stage_timings(
+                prepare_total_s=runtime_stats.observation_prepare_s,
+                prefix_total_s=runtime_stats.prefix_build_s,
+                suffix_total_s=runtime_stats.suffix_rollout_s,
+                total_total_s=runtime_stats.inference_total_s,
+                samples=runtime_stats.inference_launches,
+            )
+        ),
+    }
+    logging.info("VLASH runtime stats: %s", payload)
 
 
 def load_and_compile_policy(cfg: RunConfig) -> PreTrainedPolicy:
@@ -547,6 +809,13 @@ def build_dataset_features(robot: Robot) -> dict[str, dict]:
     return {**action_features, **obs_features}
 
 
+def make_runtime_robot(config) -> Robot:
+    """Instantiate either a real robot or the local mock robot."""
+    if isinstance(config, MockRobotConfig) or getattr(config, "type", None) == "mock_robot":
+        return MockRobot(config)
+    return make_robot_from_config(config)
+
+
 @parser.wrap()
 def run(cfg: RunConfig):
     """Main entry point for VLASH robot inference.
@@ -573,7 +842,7 @@ def run(cfg: RunConfig):
         init_rerun(session_name="vlash_run")
 
     # Setup robot and validate camera configuration
-    robot = make_robot_from_config(cfg.robot)
+    robot = make_runtime_robot(cfg.robot)
     original_policy_config = PreTrainedConfig.from_pretrained(cfg.policy.pretrained_path)
     image_feature_map = validate_robot_cameras(robot, original_policy_config, cfg.camera_feature_map)
 

@@ -39,6 +39,7 @@ from lerobot.utils.utils import get_safe_torch_device, init_logging
 
 from benchmarks.benchmark_config import BenchmarkConfig
 from vlash.policies.factory import get_policy_class, make_policy
+from vlash.runtime_stats import stage_timings_to_dict, summarize_stage_timings
 
 
 def load_dataset(cfg: BenchmarkConfig) -> tuple[LeRobotDataset, LeRobotDatasetMetadata]:
@@ -339,6 +340,68 @@ def benchmark_inference_latency_impl(
     return results
 
 
+def profile_stage_timings(
+    policy: PreTrainedPolicy,
+    dataloader: DataLoader,
+    cfg: BenchmarkConfig,
+) -> dict[str, float] | None:
+    """Profile staged runtime phases without perturbing the main latency path."""
+    if not all(hasattr(policy, attr) for attr in ("build_prefix_context", "rollout_action_chunk")):
+        return None
+
+    device = get_safe_torch_device(cfg.policy.device)
+    stage_prepare_total_s = 0.0
+    stage_prefix_total_s = 0.0
+    stage_suffix_total_s = 0.0
+    stage_total_total_s = 0.0
+    stage_samples = 0
+
+    with torch.inference_mode():
+        for i, batch in enumerate(dataloader):
+            if i >= cfg.num_samples:
+                break
+
+            prepare_start = time.perf_counter()
+            batch = prepare_batch(batch, device, policy, cfg.image_feature_map)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            prepare_s = time.perf_counter() - prepare_start
+
+            total_start = time.perf_counter()
+
+            prefix_start = time.perf_counter()
+            prefix_context = policy.build_prefix_context(batch)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            prefix_s = time.perf_counter() - prefix_start
+
+            suffix_start = time.perf_counter()
+            _ = policy.rollout_action_chunk(prefix_context)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            suffix_s = time.perf_counter() - suffix_start
+
+            total_s = time.perf_counter() - total_start
+            stage_prepare_total_s += prepare_s
+            stage_prefix_total_s += prefix_s
+            stage_suffix_total_s += suffix_s
+            stage_total_total_s += total_s
+            stage_samples += 1
+
+    if stage_samples == 0:
+        return None
+
+    return stage_timings_to_dict(
+        summarize_stage_timings(
+            prepare_total_s=stage_prepare_total_s,
+            prefix_total_s=stage_prefix_total_s,
+            suffix_total_s=stage_suffix_total_s,
+            total_total_s=stage_total_total_s,
+            samples=stage_samples,
+        )
+    )
+
+
 def print_results(results: dict, cfg: BenchmarkConfig):
     """Print formatted benchmark results to console."""
     pretrained_path = getattr(cfg.policy, 'pretrained_path', None) or "N/A (new model)"
@@ -366,6 +429,13 @@ def print_results(results: dict, cfg: BenchmarkConfig):
     print(f"  P99: {results['p99_ms']:.2f} ms")
     print(f"\nThroughput:")
     print(f"  FPS: {results['fps']:.2f}")
+    if "stage_timings_ms" in results:
+        stage_timings = results["stage_timings_ms"]
+        print(f"\nStage Timing Means (milliseconds):")
+        print(f"  Prepare: {stage_timings['prepare_mean_ms']:.2f} ms")
+        print(f"  Prefix:  {stage_timings['prefix_mean_ms']:.2f} ms")
+        print(f"  Suffix:  {stage_timings['suffix_mean_ms']:.2f} ms")
+        print(f"  Total:   {stage_timings['total_mean_ms']:.2f} ms")
     print("=" * 80 + "\n")
 
 
@@ -449,6 +519,18 @@ def benchmark_inference_latency(cfg: BenchmarkConfig):
     
     # Benchmark
     results = benchmark_inference_latency_impl(policy, dataloader, cfg)
+
+    # Stage profiling uses a separate pass so it does not perturb the main latency numbers.
+    stage_dataloader = DataLoader(
+        dataset,
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        num_workers=cfg.num_workers,
+        pin_memory=True if cfg.policy.device == "cuda" else False,
+    )
+    stage_timings = profile_stage_timings(policy, stage_dataloader, cfg)
+    if stage_timings is not None:
+        results["stage_timings_ms"] = stage_timings
     
     # Output
     print_results(results, cfg)
