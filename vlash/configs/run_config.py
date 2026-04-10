@@ -88,6 +88,11 @@ class RunConfig:
     # Optional JSON output path for structured runtime stats emitted by `vlash run`.
     runtime_stats_output: str | None = None
 
+    # Optional prototype correctness check for the active suffix backend.
+    # When enabled, staged inference also compares the active backend against
+    # the built-in local fallback backend and records the latest diff.
+    suffix_backend_check: bool = False
+
     def __post_init__(self):
         """Parse policy config and validate settings."""
         # Handle policy configuration with CLI override support

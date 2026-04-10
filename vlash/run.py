@@ -94,6 +94,9 @@ class InferenceArtifacts:
     prefix_context: object | None = None
     timings: InferenceTimings | None = None
     future_state_mode: str = "none"
+    suffix_backend_name: str = "unknown"
+    suffix_backend_max_abs_diff: float | None = None
+    suffix_backend_mean_abs_diff: float | None = None
 
 
 @dataclass
@@ -112,6 +115,9 @@ class RuntimeStats:
     prefix_build_s: float = 0.0
     suffix_rollout_s: float = 0.0
     inference_total_s: float = 0.0
+    suffix_backend_name: str = "unknown"
+    suffix_backend_max_abs_diff: float | None = None
+    suffix_backend_mean_abs_diff: float | None = None
 
 
 def normalize_image_feature_name(name: str) -> str:
@@ -176,6 +182,7 @@ class VLASHAsyncManager:
         single_task: str | None,
         overlap_steps: int,
         image_feature_map: dict[str, str] | None = None,
+        suffix_backend_check: bool = False,
     ):
         """Initialize the async manager.
         
@@ -193,6 +200,7 @@ class VLASHAsyncManager:
         self.n_action_steps = policy.config.n_action_steps
         self.overlap_steps = overlap_steps
         self.image_feature_map = image_feature_map or {}
+        self.suffix_backend_check = suffix_backend_check
         
         # Chunk state management
         self.current_chunk_slot = ChunkSlot()  # Currently executing chunk on CPU
@@ -322,6 +330,10 @@ class VLASHAsyncManager:
             action_chunk = self.policy.rollout_action_chunk(prefix_context)
             suffix_time = time.perf_counter() - suffix_start
 
+            comparison = None
+            if self.suffix_backend_check and hasattr(self.policy, "compare_suffix_backend"):
+                comparison = self.policy.compare_suffix_backend(prefix_context)
+
         timings = InferenceTimings(
             observation_prepare_s=prepare_time,
             prefix_build_s=prefix_time,
@@ -333,6 +345,9 @@ class VLASHAsyncManager:
             prefix_context=prefix_context,
             timings=timings,
             future_state_mode=future_state_mode,
+            suffix_backend_name=getattr(self.policy, "get_suffix_backend_name", lambda: "unknown")(),
+            suffix_backend_max_abs_diff=None if comparison is None else comparison.max_abs_diff,
+            suffix_backend_mean_abs_diff=None if comparison is None else comparison.mean_abs_diff,
         )
 
     def prepare_inference_observation(
@@ -420,11 +435,17 @@ class VLASHAsyncManager:
         payload = {
             "stage": stage,
             "future_state_mode": inference_artifacts.future_state_mode,
+            "suffix_backend_name": inference_artifacts.suffix_backend_name,
         }
         if inference_artifacts.timings is not None:
             payload["timings_ms"] = {
                 key: round(value * 1000, 2)
                 for key, value in asdict(inference_artifacts.timings).items()
+            }
+        if inference_artifacts.suffix_backend_max_abs_diff is not None:
+            payload["suffix_backend_comparison"] = {
+                "max_abs_diff": inference_artifacts.suffix_backend_max_abs_diff,
+                "mean_abs_diff": inference_artifacts.suffix_backend_mean_abs_diff,
             }
         logging.debug("Staged inference artifacts: %s", payload)
 
@@ -432,6 +453,9 @@ class VLASHAsyncManager:
         """Accumulate staged inference timings into runtime stats."""
         self.runtime_stats.inference_launches += 1
         self.runtime_stats.last_future_state_mode = inference_artifacts.future_state_mode
+        self.runtime_stats.suffix_backend_name = inference_artifacts.suffix_backend_name
+        self.runtime_stats.suffix_backend_max_abs_diff = inference_artifacts.suffix_backend_max_abs_diff
+        self.runtime_stats.suffix_backend_mean_abs_diff = inference_artifacts.suffix_backend_mean_abs_diff
         if inference_artifacts.timings is None:
             return
 
@@ -613,6 +637,7 @@ def run_loop(
     image_feature_map: dict[str, str] | None = None,
     action_quant_ratio: int = 1,
     inference_overlap_steps: int = 0,
+    suffix_backend_check: bool = False,
     display_data: bool = False,
     control_time_s: int | float = 60,
 ) -> dict:
@@ -630,6 +655,7 @@ def run_loop(
         single_task: Task description for policies.
         action_quant_ratio: Action quantization ratio.
         inference_overlap_steps: Steps of overlap between chunks.
+        suffix_backend_check: Whether to compare active suffix backend to local fallback.
         display_data: Whether to log data to Rerun for visualization.
         control_time_s: Total runtime in seconds.
     """
@@ -647,6 +673,7 @@ def run_loop(
         single_task=single_task,
         overlap_steps=effective_overlap_steps,
         image_feature_map=image_feature_map,
+        suffix_backend_check=suffix_backend_check,
     )
 
     step_count = 0
@@ -701,6 +728,11 @@ def run_loop(
         "inference_launches": runtime_stats.inference_launches,
         "chunk_switches": runtime_stats.chunk_switches,
         "last_future_state_mode": runtime_stats.last_future_state_mode,
+        "suffix_backend": {
+            "name": runtime_stats.suffix_backend_name,
+            "max_abs_diff": runtime_stats.suffix_backend_max_abs_diff,
+            "mean_abs_diff": runtime_stats.suffix_backend_mean_abs_diff,
+        },
         "timings_ms": {
             "loop_avg": round(
                 (runtime_stats.loop_s / runtime_stats.loop_iterations) * 1000, 2
@@ -900,6 +932,7 @@ def run(cfg: RunConfig):
             image_feature_map=image_feature_map,
             action_quant_ratio=cfg.action_quant_ratio,
             inference_overlap_steps=cfg.inference_overlap_steps,
+            suffix_backend_check=cfg.suffix_backend_check,
             display_data=cfg.display_data,
             control_time_s=cfg.control_time_s,
         )
