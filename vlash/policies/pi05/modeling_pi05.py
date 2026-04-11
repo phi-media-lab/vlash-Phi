@@ -459,6 +459,56 @@ class DelayedQueuedDispatchedNumpyPI05SuffixBackend(QueuedDispatchedNumpyPI05Suf
         super().__init__(local_backend, dispatch_delay_s=max(dispatch_delay_ms, 0.0) / 1000.0)
 
 
+@dataclass
+class NPUSuffixRequest:
+    """Request shape for future NPU suffix execution."""
+
+    payload: NumpySerializedSuffixPayload
+
+
+@dataclass
+class NPUSuffixResponse:
+    """Response shape for future NPU suffix execution."""
+
+    payload: NumpySerializedSuffixPayload
+    executed_by: str
+
+
+class PI05NPUStubExecutor:
+    """Lifecycle-oriented stub executor for future NPU-backed suffix rollout."""
+
+    def __init__(self):
+        self.initialized = False
+
+    def initialize(self) -> None:
+        self.initialized = True
+
+    def execute(self, request: NPUSuffixRequest) -> NPUSuffixResponse:
+        if not self.initialized:
+            self.initialize()
+        return NPUSuffixResponse(payload=request.payload, executed_by="npu_stub_fallback")
+
+    def shutdown(self) -> None:
+        self.initialized = False
+
+
+class NPUStubPI05SuffixBackend(PI05SuffixBackend):
+    """NPU-oriented backend skeleton that currently falls back to local execution."""
+
+    name = "npu_stub_local"
+
+    def __init__(self, local_backend: LocalPI05SuffixBackend):
+        self.local_backend = local_backend
+        self.numpy_backend = NumpySerializedPI05SuffixBackend(local_backend)
+        self.executor = PI05NPUStubExecutor()
+
+    def run(self, policy: "PI05Policy", request: SuffixRolloutRequest) -> torch.Tensor:
+        payload = self.numpy_backend.serialize(request)
+        response = self.executor.execute(NPUSuffixRequest(payload=payload))
+        restored_request = self.numpy_backend.deserialize(response.payload)
+        return self.local_backend.run(policy, restored_request)
+
+
 class PI05PrefixEmbedder(nn.Module):
     """Embed images and language tokens into prefix sequence.
     
@@ -1774,6 +1824,8 @@ class PI05Policy(PreTrainedPolicy):
                 self._local_suffix_backend,
                 dispatch_delay_ms=getattr(self.config, "suffix_backend_dispatch_delay_ms", 0.0),
             )
+        if backend_name == "npu_stub_local":
+            return NPUStubPI05SuffixBackend(self._local_suffix_backend)
         raise ValueError(f"Unsupported suffix backend: {backend_name}")
 
     def get_suffix_backend_name(self) -> str:

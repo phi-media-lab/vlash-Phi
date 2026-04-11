@@ -45,7 +45,7 @@ Key interpretation:
 
 ## Prototype Backend Layers
 
-The current prototype supports seven suffix backend modes:
+The current prototype supports eight suffix backend modes:
 
 - `local`
 - `dummy_local`
@@ -54,6 +54,7 @@ The current prototype supports seven suffix backend modes:
 - `dispatched_numpy_local`
 - `queued_dispatched_numpy_local`
 - `delayed_queued_dispatched_numpy_local`
+- `npu_stub_local`
 
 ### `local`
 
@@ -143,6 +144,7 @@ Validated:
 - config override works
 - backend name switches correctly
 - comparison result remains exact (`max_abs_diff = 0.0`)
+- runtime-integrated validation works, but this skeleton is intentionally not performance-oriented
 
 ### `queued_dispatched_numpy_local`
 
@@ -178,6 +180,22 @@ Validated:
 - backend name switches correctly
 - comparison result remains exact (`max_abs_diff = 0.0`)
 
+### `npu_stub_local`
+
+This is the first explicitly NPU-oriented skeleton backend.
+
+Purpose:
+
+- define a future NPU backend lifecycle (`initialize`, `execute`, `shutdown`)
+- freeze a request/response contract distinct from the generic queue-based prototypes
+- keep the current branch safe by routing execution back to the existing local suffix path
+
+Validated:
+
+- config override works
+- backend name switches correctly
+- comparison result remains exact (`max_abs_diff = 0.0`)
+
 ## Runtime Validation Mode
 
 The prototype no longer depends only on offline checks.
@@ -198,6 +216,7 @@ Current runtime support:
   - [libero_rocm_p3_proto_dispatched.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_dispatched.yaml)
   - [libero_rocm_p3_proto_queued.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_queued.yaml)
   - [libero_rocm_p3_proto_delayed.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_proto_delayed.yaml)
+  - [libero_rocm_p3_npu_stub.yaml](/home/amd/vlash/examples/inference/libero_rocm_p3_npu_stub.yaml)
 
 This means `vlash run` can now validate prototype backend correctness during staged inference launches.
 

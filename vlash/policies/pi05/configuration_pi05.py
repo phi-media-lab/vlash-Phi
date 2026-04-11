@@ -151,7 +151,7 @@ class PI05Config(PreTrainedConfig):
     # Attention/MLP fusion (for inference optimization)
     fuse_qkv: bool = False  # Fuse Q/K/V projections
     fuse_gate_up: bool = False  # Fuse gate/up projections in MLP
-    suffix_backend: str = "local"  # Suffix rollout backend: "local", "dummy_local", "serialized_local", "numpy_local", "dispatched_numpy_local", "queued_dispatched_numpy_local", or "delayed_queued_dispatched_numpy_local"
+    suffix_backend: str = "local"  # Suffix rollout backend: "local", "dummy_local", "serialized_local", "numpy_local", "dispatched_numpy_local", "queued_dispatched_numpy_local", "delayed_queued_dispatched_numpy_local", or "npu_stub_local"
     suffix_backend_dispatch_delay_ms: float = 0.0  # Artificial request/response dispatch delay for prototype backends
 
     # === Optimizer Settings ===
