@@ -212,6 +212,68 @@ Current interpretation:
 - for short-lived processes on `gfx1150`, eager remains the safer default baseline; compiled is more appropriate for warm long-lived services
 - the smoke benchmark remaps `lerobot/pusht` image/state features to the public LIBERO checkpoint so that the full CLI path can be exercised
 
+## Current `LIBERO` System Comparison Status
+
+The branch now includes a common `LIBERO` harness:
+
+- [tools/libero_system_compare.py](tools/libero_system_compare.py)
+
+This harness runs:
+
+- `openpi` with `pi05_libero_pytorch`
+- `vlash` with `mit-han-lab/vlash-pi05-libero-async5`
+
+through the same `LIBERO` driver, task ids, seeds, and JSON output schema.
+
+Current validated task-level milestones on `gfx1150`:
+
+- both systems complete a `2-step` smoke run without crash
+- both systems complete a `20-step` runtime smoke on the same task/seed
+- both systems complete a `50-step` sweep on tasks `{0,1}` and seeds `{0,1}`
+
+Representative `50-step` aggregate results on this machine:
+
+- `openpi`
+  - load `29.60 s`
+  - first-action latency `1527.90 ms`
+  - average step latency `143.40 ms`
+  - average episode duration `8.72 s`
+- `vlash`
+  - load `33.92 s`
+  - first-action latency `1172.94 ms`
+  - average step latency `44.73 ms`
+  - average episode duration `3.75 s`
+
+Interpretation:
+
+- on the current `gfx1150` task-level runs, `vlash` is faster than `openpi`
+- these runs are still runtime-oriented, not final task-success conclusions
+- `openpi` is currently measured with PyTorch compile disabled in the harness to avoid folding first-call compile cost into smoke/runtime bring-up results
+
+## MI300X Readiness
+
+Current evidence is now strong enough to move the next stage to `MI300X`.
+
+What is already settled on `gfx1150`:
+
+- the shared `openpi pi05_base -> vlash` bridge works at model-core level
+- both complete systems can run under one common `LIBERO` harness
+- task-level smoke and short sweeps no longer fail on basic bring-up blockers
+
+What `gfx1150` is no longer good for:
+
+- final performance conclusions
+- long-horizon task-success conclusions
+- deciding between systems on a deployment-oriented GPU
+
+Current recommendation:
+
+- keep this branch as the `gfx1150` baseline and local harness reference
+- move the next apple-to-apple stage to `MI300X`
+- run two tracks there:
+  - shared `pi05_base` core-model comparison
+  - task-level `LIBERO` system comparison
+
 ## Recommended Next Work
 
 If continuing from this baseline branch, the most useful next steps are:

@@ -251,6 +251,66 @@ This plan is complete when we have:
 3. one summary table covering runtime and task outcomes
 4. one recommendation stating which system is better for actual `LIBERO` work on `gfx1150`
 
+## Current Status
+
+The branch has already passed the Phase 1 harness gate and the minimum Phase 2 runtime gate.
+
+Implemented:
+
+- one common harness: `tools/libero_system_compare.py`
+- one shared JSON output schema for both systems
+- one `openpi` adapter
+- one `vlash` adapter
+
+Validated on `gfx1150`:
+
+- `2-step` smoke:
+  - both systems run without crash
+- `20-step` same-task runtime smoke:
+  - both systems complete under the same harness
+- `50-step` sweep on tasks `{0,1}` and seeds `{0,1}`:
+  - both systems complete all planned episodes
+
+Current `50-step` aggregate numbers:
+
+- `openpi`
+  - load `29.60 s`
+  - first-action latency `1527.90 ms`
+  - average step latency `143.40 ms`
+  - average episode duration `8.72 s`
+- `vlash`
+  - load `33.92 s`
+  - first-action latency `1172.94 ms`
+  - average step latency `44.73 ms`
+  - average episode duration `3.75 s`
+
+Current interpretation:
+
+- `vlash` is faster on the current `gfx1150` task-level runs
+- this is still a runtime-first comparison, not a final task-success conclusion
+- both systems still need larger task/seed coverage before any stronger system recommendation is made
+
+## MI300X Migration Decision
+
+Current evidence is strong enough to move the next stage to `MI300X`.
+
+Why the move is now justified:
+
+- the `gfx1150` machine has already answered the bring-up question
+- the harness is no longer blocked on basic `openpi` or `vlash` integration issues
+- the remaining need is cleaner performance and longer-horizon task evaluation on a stronger GPU
+
+What should move to `MI300X`:
+
+1. the shared `pi05_base` core-model comparison
+2. the task-level `LIBERO` system comparison
+
+What should stay on `gfx1150`:
+
+- local harness iteration
+- baseline reproducibility checks
+- small functional smoke tests
+
 ## Current Recommendation
 
 Based on current evidence, the next engineering move should be:

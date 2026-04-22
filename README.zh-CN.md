@@ -212,6 +212,68 @@ shared-checkpoint 的 stage breakdown 明显还是 prefix 主导：
 - 对 `gfx1150` 这类短命进程场景，eager 仍然是更稳的默认 baseline；compiled 更适合预热后的长驻服务
 - smoke benchmark 会把 `lerobot/pusht` 的 image/state 特征映射到公开 LIBERO checkpoint 上，以便完整跑通 CLI 路径
 
+## 当前 `LIBERO` 系统级对比状态
+
+这条分支现在已经包含一个统一的 `LIBERO` 对比 harness：
+
+- [tools/libero_system_compare.py](tools/libero_system_compare.py)
+
+它会把：
+
+- `openpi` 的 `pi05_libero_pytorch`
+- `vlash` 的 `mit-han-lab/vlash-pi05-libero-async5`
+
+放进同一个 `LIBERO` driver、同一组 task id / seed 和同一套 JSON 输出结构里。
+
+当前在 `gfx1150` 上已经验证的系统级里程碑：
+
+- 两个系统都能完成 `2-step` smoke，不崩
+- 两个系统都能完成同 task/seed 的 `20-step` runtime smoke
+- 两个系统都能完成 tasks `{0,1}`、seeds `{0,1}` 的 `50-step` sweep
+
+这台机器上 `50-step` 聚合结果目前是：
+
+- `openpi`
+  - load `29.60 s`
+  - 首动作延迟 `1527.90 ms`
+  - 平均单步延迟 `143.40 ms`
+  - 平均 episode 时长 `8.72 s`
+- `vlash`
+  - load `33.92 s`
+  - 首动作延迟 `1172.94 ms`
+  - 平均单步延迟 `44.73 ms`
+  - 平均 episode 时长 `3.75 s`
+
+当前解释：
+
+- 以这轮 `gfx1150` 的 task-level 结果看，`vlash` 比 `openpi` 更快
+- 但这些结果仍然主要是 runtime 对比，不是最终 task-success 结论
+- harness 里当前对 `openpi` 显式关闭了 PyTorch compile，避免把首轮 compile 成本混进 smoke/runtime bring-up 结果
+
+## MI300X 迁移就绪度
+
+基于当前证据，下一阶段已经适合迁移到 `MI300X`。
+
+在 `gfx1150` 上已经收掉的问题：
+
+- shared `openpi pi05_base -> vlash` bridge 在模型核心层面已经成立
+- 两个完整系统都能在统一 `LIBERO` harness 下运行
+- task-level smoke 和短 sweep 已经不再卡在 bring-up blocker
+
+而 `gfx1150` 已经不适合继续承担的是：
+
+- 最终性能结论
+- 更长 horizon 的 task-success 结论
+- 面向部署级 GPU 的系统判断
+
+当前建议：
+
+- 继续保留这条分支作为 `gfx1150` baseline 和本地 harness 参考
+- 下一阶段迁移到 `MI300X`
+- 在 `MI300X` 上并行做两条：
+  - shared `pi05_base` 的核心模型对比
+  - `LIBERO` 任务级系统对比
+
 ## 建议的下一步
 
 如果继续沿这条 baseline 分支往前做，最值得做的是：
