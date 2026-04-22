@@ -146,6 +146,7 @@ class PI05Config(PreTrainedConfig):
     gradient_checkpointing: bool = False  # Trade compute for memory
     compile_model: bool = False  # Use torch.compile optimization
     compile_mode: str = "max-autotune"  # Torch compile mode
+    staged_compile_mode: str = "max-autotune-no-cudagraphs"  # Safer compile mode for split staged prefix/suffix helpers
     device: str | None = None  # Target device (None = auto-detect)
 
     # Attention/MLP fusion (for inference optimization)

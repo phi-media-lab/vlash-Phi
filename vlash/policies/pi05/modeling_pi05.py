@@ -1046,6 +1046,13 @@ class PI05Model(nn.Module):
         # Optional torch.compile for faster inference
         if config.compile_model:
             torch.set_float32_matmul_precision("high")
+            staged_compile_mode = getattr(config, "staged_compile_mode", config.compile_mode)
+            # Runtime/benchmark entrypoints call PI05Policy.predict_action_chunk(),
+            # which uses staged prefix+suffix helpers instead of sample_actions().
+            # On gfx1150, split staged helpers are stable with no-cudagraphs while the
+            # full sample_actions path still benefits from max-autotune.
+            self._prefill_prefix_cache = torch.compile(self._prefill_prefix_cache, mode=staged_compile_mode)
+            self.denoise_step = torch.compile(self.denoise_step, mode=staged_compile_mode)
             self.sample_actions = torch.compile(self.sample_actions, mode=config.compile_mode)
 
     def init_qkv_fusion_from_existing(self) -> None:
@@ -1204,15 +1211,19 @@ class PI05Model(nn.Module):
         for layer in self.layers:
             layer.self_attn.attn.reset_cache()
 
-    @torch.no_grad()
-    def build_prefix_context(
+    def _prefill_prefix_cache(
         self,
         images,
         img_masks,
         tokens,
         masks,
-    ) -> PrefixContext:
-        """Run the prefix prefill path and materialize its runtime metadata."""
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Populate layer-local prefix KV cache and return the prefix masks.
+
+        This helper is deliberately tensor-only so it can be wrapped by
+        torch.compile and reused by both staged runtime inference and the
+        direct sample_actions path.
+        """
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.prefix_embedder(
             images, img_masks, tokens, masks
         )
@@ -1237,13 +1248,28 @@ class PI05Model(nn.Module):
                 use_cache=True,
             )
 
+        return prefix_pad_masks, prefix_att_masks
+
+    @torch.no_grad()
+    def build_prefix_context(
+        self,
+        images,
+        img_masks,
+        tokens,
+        masks,
+    ) -> PrefixContext:
+        """Run the prefix prefill path and materialize its runtime metadata."""
+        prefix_pad_masks, prefix_att_masks = self._prefill_prefix_cache(
+            images, img_masks, tokens, masks
+        )
+
         return PrefixContext(
             prefix_pad_masks=prefix_pad_masks,
             prefix_att_masks=prefix_att_masks,
-            prefix_length=prefix_embs.shape[1],
-            batch_size=prefix_embs.shape[0],
-            dtype=prefix_embs.dtype,
-            device=prefix_embs.device,
+            prefix_length=prefix_pad_masks.shape[1],
+            batch_size=prefix_pad_masks.shape[0],
+            dtype=prefix_att_masks.dtype,
+            device=prefix_pad_masks.device,
         )
 
     @torch.no_grad()
@@ -1745,6 +1771,8 @@ class PI05Policy(PreTrainedPolicy):
                 f"Unexpected keys: {unexpected_fatal}"
             )
 
+        cls._repair_nonfinite_normalization_buffers(instance)
+
         instance.to(config.device)
         instance.eval()
 
@@ -1755,6 +1783,42 @@ class PI05Policy(PreTrainedPolicy):
             instance.model.init_mlp_fusion_from_existing()
 
         return instance
+
+    @staticmethod
+    def _repair_nonfinite_normalization_buffers(instance: "PI05Policy") -> None:
+        """Replace uninitialized normalization statistics with identity defaults.
+
+        OpenPI-style base checkpoints may only ship statistics for active task
+        dimensions (for example 14-D state/action), while VLASH materializes
+        padded buffers from the config. Missing tail dims are initialized to
+        `inf` by Normalize/Unnormalize and will propagate NaN/Inf at inference.
+        Treat those missing dims as identity normalization instead.
+        """
+
+        default_values = {
+            "mean": 0.0,
+            "std": 1.0,
+            "min": -1.0,
+            "max": 1.0,
+            "q01": -1.0,
+            "q99": 1.0,
+            "q10": -1.0,
+            "q90": 1.0,
+        }
+
+        for module_name in ("normalize_inputs", "normalize_targets", "unnormalize_outputs"):
+            module = getattr(instance, module_name, None)
+            if module is None:
+                continue
+
+            for name, value in module.named_parameters():
+                replacement = default_values.get(name.rsplit(".", 1)[-1])
+                if replacement is None:
+                    continue
+                with torch.no_grad():
+                    mask = ~torch.isfinite(value)
+                    if mask.any():
+                        value[mask] = replacement
 
     def reset(self):
         """Reset action queue. Call when environment resets."""
